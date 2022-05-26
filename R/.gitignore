@@ -5,6 +5,9 @@
 # Configuration file
 config.R
 
+# R Project
+.Rproj
+
 # History files
 .Rhistory
 .Rapp.history
