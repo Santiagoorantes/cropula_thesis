@@ -440,7 +440,7 @@ params <- coef(fit_BetaShift)
 sim_y <- rbeta_shift(n, alpha = params["alpha"], beta = params["beta"],
                      a = a, b = b)
 # CDF 
-Y <- pbeta_shift(sim_y, params["alpha"], params["beta"], a, b)
+y <- pbeta_shift(sim_y, params["alpha"], params["beta"], a, b)
 
 # t-dist for the price (ARMA-GARCH residuals)
 ag_params <- coef(model_fit)
@@ -448,7 +448,7 @@ nu <- coef(model_fit)["shape"]
 sim_t <- rt(n, nu)
 
 # CDF
-P <- pt(sim_t, df = nu)
+x <- pt(sim_t, df = nu)
 
 fig <- ggplot() + 
   geom_point(aes(x = sim_y, y = sim_t), 
@@ -462,31 +462,60 @@ ggMarginal(fig, type = "histogram", size = 3,
 # --- Fitting the Copulas ---
 
 # Implicit theta value for a given tau
-noneg_cops <- list(gumbelCopula(),
-                   joeCopula())
-cops <- list(claytonCopula(),
-             normalCopula(),
-             tCopula(),
-             amhCopula())
+d <- 2
+nonegacops <- list(gumbelCopula(dim = d),
+                   claytonCopula(dim = d),
+                   joeCopula(dim = d))
+acops <- list(amhCopula(dim = d),
+             frankCopula(dim = d))
+cops <- list(normalCopula(dim = d),
+             tCopula(dim = d),
+             fgmCopula(dim = d))
 
-theta <- iTau(cops[[4]], stat_rho)
+# Choose Copula
+i <- 1
+mycop <- acops[[i]]
 
-C2 <- onacopula("AMH", C(abs(theta), 1:2))
-C2
-dim(U2 <- rnacopula(1000, C2))
-cor(U2, method="kendall")
-splom2(sign(stat_rho) * U2)
+# Kendall's tau
+tau <- ifelse(list(mycop) %in% noneg_cops, abs(stat_rho), stat_rho)
+
+# Corresponding parameter of the Archimedian Cop
+theta <- iTau(mycop, tau)
+
+# Fix the copula parameter parameter
+attr(mycop, "parameters")[1] <- theta
+mycop
+
+## Only for Archimedian Copulas
+#C2 <- onacopula(mycop, C(theta, 1:2))
+#dim(U2 <- rnacopula(n, C2))
+#cor(U2, method="kendall")
+#splom2(sign(stat_rho) * U2)
+
+# Simulating the Copula
+simcop <- rCopula(n, mycop)
+u <- simcop[,1]
+v <- simcop[,2]
+# Simulated values of the Yield
+Y <- qbeta_shift(u, params["alpha"], params["beta"], a, b)
+# Simulated values of the residuals of the lr of the Price
+X <- qt(v,  nu)
+
+fig <- ggplot() + 
+  geom_point(aes(x = Y, y = (-sign(tau)) * X), 
+             colour = "steelblue", size = 2)
+ggMarginal(fig, type = "histogram", size = 3,
+           fill = "steelblue",
+           xparams = list(binwidth = 0.5),
+           yparams = list(binwidth = 0.5))
 
 
 
-cop_model <- claytonCopula(dim = 2)
-m <- pobs(cbind(sim_y, sim_t))
-fit <- fitCopula(cop_model, m, method = "ml")
-coef(fit)
-summary(fit)
 
 # VineCopula
 #fit_Cop <- BiCopSelect(Y, P, familyset = NA)
+
+# Price parametric dists just for fun
 
 test_fit1 <- fitdist(price_dt, distr = "weibull")
 summary(test_fit1)  
