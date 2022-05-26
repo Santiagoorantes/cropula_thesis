@@ -1,0 +1,562 @@
+---
+title: "Modeling Corn Price Series"
+author: "Santiago Orantes"
+date: "10/05/2022"
+output:
+  rmdformats::readthedown:
+    code_folding: show
+    self_contained: true
+    thumbnails: false
+    lightbox: false
+    use_bookdown: false
+pkgdown:
+  as_is: true 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Corn Futures Price
+
+In the following, we analyze the **Continuous Futures Contract** for **Corn** between **01/01/2003** to **12/31/2020**.  
+Find more about [Quandl Continuous Futures](https://data.nasdaq.com/data/CHRIS-wiki-continuous-futures/documentation)
+and [Corn Futures](https://data.nasdaq.com/data/CHRIS/CME_C3-corn-futures-continuous-contract-3-c3)
+
+The **price** is in *USD/bushel*.
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+require(rugarch, quietly = TRUE)
+require(viridis, quietly = TRUE)
+require(ggplot2)
+require(plotly)
+library(tidyquant)
+
+corn_ts <- read.csv("C:/Users/santi/OneDrive/Vienna/QFIN WU/Thesis/R/info_comm/CME_C3_20210629.csv")
+
+my_colors <- c(my_brick="#CC704B", my_lgreen="#9FC088", my_lbrown="#E8C07D",
+               my_lblue="#8FBDD3", my_cyan="#5AA897", my_lred="#DD4A48")
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, out.width="100%"}
+# Corn continuous futures
+corn_ts$Date <- as.Date(corn_ts$Date, "%Y-%m-%d")
+# Timeframe of interest
+ini_date <- as.Date("2003-01-01")
+end_date <- as.Date("2020-12-31")
+corn_ts <- filter(corn_ts, Date >= ini_date, Date <= end_date)
+
+# Calculate log returns
+row.names(corn_ts) <- corn_ts$Date
+corn_ts <- corn_ts %>% dplyr::select(-c(Date))
+settle_price <- corn_ts$Settle
+lr <- diff(log(settle_price))[-1]
+l <- length(lr)
+
+# Plotting the Price series and the log-returns
+df <- corn_ts
+fig <- plot_ly(df, type = 'scatter', mode = 'lines')%>%
+  add_trace(x = ~row.names(df), y = ~settle_price,
+            line = list(color=my_colors["my_brick"]))%>%
+  layout(showlegend = F, title='Corn Futures Contracts',
+         xaxis = list(title = "date",
+                      rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(count=3, label="3y", step="year", stepmode="backward"),
+                          list(count=5, label="5y", step="year", stepmode="backward"),
+                          list(count=10, label="10y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))))
+fig <- fig %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#e5ecf6')
+fig
+
+fig_lr <- plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = ~row.names(df)[-c((l-1):l)], y = lr,
+            line = list(color = my_colors["my_lblue"], width = 2))%>%
+  layout(showlegend = F, title='log-returns', 
+         xaxis = list(title = "date",
+                      rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(count=3, label="3y", step="year", stepmode="backward"),
+                          list(count=5, label="5y", step="year", stepmode="backward"),
+                          list(count=10, label="10y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))))
+fig_lr <- fig_lr %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#e5ecf6')
+fig_lr
+
+```
+
+
+```{r, echo=FALSE, fig.height = 4, out.width="100%"}
+#acf(lr)
+#acf(lr^2)
+
+acf_lr <- acf(lr, plot = FALSE)
+# ACF without the first lag since its always 1
+x1 = acf_lr$lag[,,1][-1]
+y1 = acf_lr$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_lr$n.used),length(acf_lr$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_lr$n.used),length(acf_lr$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"), title = 'ACF log-returns')
+acf_fig
+
+acf_lr2 <- acf(lr^2, plot = FALSE)
+x1 = acf_lr2$lag[,,1][-1]
+y1 = acf_lr2$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_lr2$n.used),length(acf_lr2$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_lr2$n.used),length(acf_lr2$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"),title='ACF (log-returns)^2')
+acf_fig
+
+```
+
+
+In the plot of the **log-returns** we can clearly see a lot of **volatility clusters** of different size and persistence over the time period we are analyzing; this is confirmed in the ACF plot of the squared series of the log-returns which shows that they are **autoccorrelated**.
+
+
+# Normal ARMA-GARCH
+
+To fit an $ARMA(p,q)-GARCH(p_g,q_g)$ model we have a standard ARMA(p,q)-model of the form
+$$\phi(B)(r_t-\mu)=\theta(B)X_t$$ 
+where the innovations $X_t$ are a $GARCH(p_g,q_g)$ process s.t. we have:
+
+$$
+\phi(B)(r_t-\mu)=\theta(B)X_t, \quad X_t=\sigma_t\epsilon_t, \quad \sigma_t^2=\alpha_0+\sum_{h=1}^{p_g}\alpha_hX_{t-h}^2+\sum_{j=1}^{q_g}\gamma_j\sigma_{t-j}^2
+$$
+
+Particularly if we fit an **ARMA(1,1)-GARCH(1,1)** model we have:
+
+$$
+\begin{aligned}
+  r_t &= \mu_t + X_t ,\quad X_t = \sigma_t\epsilon_t, \quad\epsilon_t\sim N(0,1)\\
+  \mu_t &= \mu(1-\phi_1) + \phi_1r_{t-1} + \theta_1X_{t-1} \\
+  \sigma_t^2 &= \alpha_0 + \alpha_1X_{t-1}^2 + \gamma_1\sigma_{t-1}^2
+\end{aligned}
+$$
+
+## Model Specification
+
+```{r, warning=FALSE}
+# ------------------------------------------------------------------------------
+# --- Model fit using the "rugarch" package ---
+# ------------------------------------------------------------------------------
+
+# Create the model, specify the variance.model, the mean.model and the distribution.model
+# We set the orders of our model as GARCH(1,1) and ARMA(1,1)
+model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                    mean.model = list(armaOrder = c(1, 1), include.mean = TRUE),
+                    distribution.model = "norm")
+
+model@model$pars
+# Estimation/fitting of the model
+model_fit <- ugarchfit(spec = model, data = lr)
+# Fitted Model
+model_fit
+# empirical density plot
+plot(model_fit, which=8)
+# normal QQ-plot
+plot(model_fit, which=9)
+# estimated coefficients
+coef(model_fit)
+
+```
+
+#### Note:
+**Clearly the statistics of our fitted model suggest that many of our parameters are not statistically significant and maybe the model order is not adequate. Also notice that the Pearson *gof* test rejects $H_0$ and looking at the empirical density and QQ plots we can see that the assumption of normality ($\epsilon_t\sim N(0,1)$) is underestimating the tails and may not be a good fit.** 
+**Nevertheless, for comparison reasons we will show the ARMA-GARCH with N(0,1) fit in the following plots, and after that we will proceed to fit other model orders with with a Student-t distribution.**
+
+
+The parameters of the fitted **ARMA(1,1)-GARCH(1,1)** correspond to:
+
+* **mu ($\mu$):** estimated mean of the *ARMA* process.
+* **ar1 ($\phi_1$):** autoregressive parameter for the process $r_t$
+* **ma1 ($\theta_1$):** moving average parameter for the innovations $X_t$
+* **omega ($\alpha_0$):** estimated (constant) *drift* of our conditional variance model $\sigma_t^2$.
+* **alpha1 ($\alpha_1$):** estimated weight of how much our process $\sigma_t$ depends on past values of the squared process $X_{t-1}^2$.
+* **beta1 ($\gamma_1$):** estimated weight of how much our process $\sigma_t$ depends on past volatilities $\sigma_{t-1}^2$
+
+It is worth noting that *beta1*: $|\gamma_1|=0.942541<1$ and *alpha1+beta1*: $|\alpha_1 + \gamma_1|=0.993869<1$ which tells us that our model is both **invertible** and **stationary**, and since the sum $|\alpha_1+\gamma_1|$ is close to $1$, we can see that **volatility persists for a long time** which is consistent with what we saw in the plot of the log-returns.  
+
+```{r, warning=FALSE, echo=FALSE, out.width="100%"}
+l <- length(lr)
+
+# Confidence level
+cl <- 0.95
+alpha <- (1-cl)/2
+z <- qnorm(alpha, lower.tail = F)
+u <- model_fit@fit$sigma
+m <- model_fit@fit$coef[1]
+# we adjust the estimated volatolity so that it matches the actual value for the plot
+
+fig <- plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = row.names(df)[-c(1:2)], y = lr, name = 'Corn',
+            line = list(color = my_colors["my_lblue"], width = 1))%>%
+  add_trace(x = row.names(df)[-c(1:2)], y = m+z*u, name = '97.5%',
+            line = list(color = my_colors["my_lgreen"], width = 2, dash = 'dot'))%>%
+  add_trace(x = row.names(df)[-c(1:2)], y = m-z*u, name = '2.5%',
+            line = list(color = my_colors["my_lred"], width = 2, dash = 'dot'))%>%
+  layout(title = 'Normal ARMA(1,1)-GARCH(1,1)',legend=list(title=list(text='variable')),
+         xaxis = list(dtick = "M12", tickformat="%Y"))
+options(warn = -1)
+fig <- fig %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#F6F6F6')
+
+
+fig
+
+```
+
+
+```{r, echo = FALSE, out.width="100%"}
+dates <- date(row.names(df))[-c(1:2)]
+DF <- data.frame(x1 = head(dates, -1), x2 = tail(dates, -1) , 
+                 y1 = head(model_fit@fit$sigma, -1), y2 = tail(model_fit@fit$sigma, -1))
+# Break points for the colors
+DF$col <- cut(DF$y1, c(0, 0.02, 0.03, 0.04, 0.05, Inf))
+# Color palet viridis (continuous)
+scale_colour_viridis_d <- function(..., alpha = 1, begin = 0, end = 1,
+                                   direction = 1, option = "D", aesthetics = "colour") {
+  discrete_scale(
+    aesthetics,
+    "viridis_d",
+    viridis_pal(alpha, begin, end, direction, option),
+    ...
+  )
+}
+
+p <- ggplot(data=DF, aes(x=x1, y=y1, xend = x2, yend = y2,colour=col)) +
+  geom_segment(size = 0.6) + 
+  scale_colour_viridis_d(end = 0.8, direction = -1) +
+  labs(title = 'Volatility over time', x = 'Date', y = 'Conditional Variance',
+       colour = "Levels")
+ggplotly(p)
+```
+
+## Model diagnostics (standard residuals)
+
+The model diagnostics is done based on the **standardized log-returns**
+
+$$
+\begin{aligned}
+\hat{\epsilon_t}=\frac{r_t - \mu_t(\hat{\Theta})}{\sigma_t(\hat{\Theta})}
+\end{aligned}
+$$
+
+```{r, echo=FALSE, warning=FALSE, out.width="100%"}
+stdr_res <- (lr - model_fit@fit$fitted.values) / model_fit@fit$sigma
+
+fig_std_res <- plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = row.names(df)[-c((l-1):l)], y = stdr_res,
+            line = list(color = my_colors["my_lblue"], width = 2))%>%
+  layout(showlegend = F, title='Standardized returns',
+         xaxis = list(rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(count=3, label="3y", step="year", stepmode="backward"),
+                          list(count=5, label="5y", step="year", stepmode="backward"),
+                          list(count=10, label="10y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))))
+fig_std_res <- fig_std_res %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#e5ecf6')
+fig_std_res
+
+```
+
+```{r, echo=FALSE, fig.height = 4, out.width="100%"}
+
+acf_res <- acf(stdr_res, plot = FALSE)
+# ACF without the first lag since its always 1
+x1 = acf_lr$lag[,,1][-1]
+y1 = acf_lr$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_lr$n.used),length(acf_lr$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_lr$n.used),length(acf_lr$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"), title = 'ACF log-returns')
+acf_fig
+
+acf_lr2 <- acf(stdr_res^2, plot = FALSE)
+x1 = acf_lr2$lag[,,1][-1]
+y1 = acf_lr2$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_lr2$n.used),length(acf_lr2$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_lr2$n.used),length(acf_lr2$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"),title='ACF (log-returns)^2')
+acf_fig
+```
+
+#### Standardized residuals
+
+* We can see that **volatility clusters are no longer present** in the standardized log-returns series. Nevertheless we can still see **very large and small values in the log-returns** so we will try **specifying a Student-t distribution** for the model to account for **heavier tails** in the log-returns. 
+* The ACF of $\hat{\epsilon}_t$ shows **no autocorrelation** suggesting that the **model for the conditional mean is appropriate**. 
+* The ACF of $\hat{\epsilon}_t^2$ shows **almost no autocorrelation** (with the exception of lags 9 and 30) suggesting that we got **rid of the volatility clusters**, but remember that we found out that the **parameters were not significant for the volatility model** so we still need to address this.
+
+Still the main drawback is the apparent non-normality of the log-returns and we are assuming that positive and negative returns have the same effect because in the GARCH model volatility depends squared returns. To change this we could consider using an skewed version of our distribution for the model. i.e. *"snorm"*, *"sstd"*.
+
+\newpage
+
+# Student-t ARMA-GARCH
+
+From the ARMA-GARCH model that we previously fitted, we saw that the model specification was not altogether correct (based on the *t statistic*).
+
+After testing various model orders, we find that the best fit does correspond to an ARMA-GARCH model but with a Student-t model distribution. 
+
+So we will now fit an **ARMA(1,1)-GARCH(1,1)** (without mean $\mu$ since we saw that it was not significant so we take it as zero) and with a **Student-t distribution** for the model: $\epsilon_t\sim t_{\nu}$
+
+## Model Specification
+
+```{r}
+# Create the model, specify the variance.model, mean.model and the distribution.model
+
+#model2 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+#                    mean.model = list(armaOrder = c(1, 1), include.mean = FALSE),
+#                    distribution.model = "std", fixed.pars = list(omega=0))
+
+model2 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                    mean.model = list(armaOrder = c(1, 1), include.mean = FALSE),
+                    distribution.model = "std")
+
+mydata <- data.frame(lr)
+row.names(mydata) <- row.names(corn_ts)[-c(1:2)]
+
+model2@model$pars
+# Estimation/fitting of the model
+model2_fit <- ugarchfit(spec = model2, data = mydata, solver = "solnp")
+# Fitted Model
+model2_fit
+# empirical density
+plot(model2_fit, which=8)
+# t-student QQ-plot
+plot(model2_fit, which=9)
+# estimated coefficients
+coef(model2_fit)
+```
+
+
+The parameters of the fitted **Student-t ARMA(1,1)-GARCH(1,1)** correspond to:
+
+* **ar1 ($\phi_1$):** autoregressive parameter for the process $r_t$
+* **ma1 ($\theta_1$):** moving average parameter for the innovations $X_t$
+* **omega ($\alpha_0$):** estimated (constant) *drift* of our conditional variance model $\sigma_t^2$.
+* **alpha1 ($\alpha_1$):** estimated weight of how much our process $\sigma_t$ depends on past values of the squared process $X_{t-1}^2$.
+* **beta1 ($\gamma_1$):** estimated weight of how much our process $\sigma_t$ depends on past volatilities $\sigma_{t-1}^2$
+* **shape ($\nu$):** estimated degrees of freedom for the Student-t distribution.
+
+Again we have *beta1*: $|\gamma_1|=0.9394575<1$ and *alpha1+beta1*: $|\alpha_1 + \gamma_1|=0.999<1$ so our model is both **invertible** and **stationary** and the **volatility persists for a long time** which is consistent with our log-returns $r_t$.
+
+This time notice how the **Student-t** distribution fits very well out data as shown in both the **empirical density** and **QQ plots**.  
+
+```{r, warning=FALSE, echo=FALSE, out.width="100%"}
+l <- length(lr)
+
+# Confidence level
+cl <- 0.95
+alpha <- (1-cl)/2
+nu <- coef(model2_fit)["shape"]
+t <- qt(alpha, nu, lower.tail = F)
+u <- rev(model2_fit@fit$sigma)
+m <- 0
+# we adjust the estimated volatility so that it matches the actual value for the plot
+
+fig <- plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = row.names(mydata), y = lr, name = 'Corn',
+            line = list(color = my_colors["my_lblue"], width = 1))%>%
+  add_trace(x = row.names(mydata), y = m+t*u, name = '97.5%',
+            line = list(color = my_colors["my_lgreen"], width = 2, dash = 'dash'))%>%
+  add_trace(x = row.names(mydata), y = m-t*u, name = '2.5%',
+            line = list(color = my_colors["my_lred"], width = 2, dash = 'dash'))%>%
+  layout(title = 'Student-t ARMA(1,1)-GARCH(1,1)',legend=list(title=list(text='variable')),
+         xaxis = list(dtick = "M12", tickformat="%Y"))
+options(warn = -1)
+fig <- fig %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#F6F6F6')
+
+
+fig
+
+```
+
+We can see that our confidence bands (at the 95% C.I.) cover the log-returns very well in line with the volatility clusters of the series; the exceedances are approx <5% according to our C.I. and only in a few cases do they exceed by a considerable amount out bands. 
+
+
+```{r, echo = FALSE, out.width="100%"}
+dates <- date(row.names(mydata))
+DF <- data.frame(x1 = head(dates, -1), x2 = tail(dates, -1) , 
+                 y1 = head(rev(model2_fit@fit$sigma), -1), y2 = tail(rev(model2_fit@fit$sigma), -1))
+# Break points for the colors
+DF$col <- cut(DF$y1, c(0, 0.02, 0.03, 0.04, Inf))
+# Color pallet viridis (continuous)
+scale_colour_viridis_d <- function(..., alpha = 1, begin = 0, end = 1,
+                                   direction = 1, option = "D", aesthetics = "colour") {
+  discrete_scale(
+    aesthetics,
+    "viridis_d",
+    viridis_pal(alpha, begin, end, direction, option),
+    ...
+  )
+}
+
+p <- ggplot(data=DF, aes(x=x1, y=y1, xend = x2, yend = y2,colour=col)) +
+  geom_segment(size = 0.6) + 
+  scale_colour_viridis_d(end = 0.8, direction = -1) +
+  labs(title = 'Volatility over time', x = 'Date', y = 'Conditional Variance',
+       colour = "Levels")
+ggplotly(p)
+```
+
+## Model diagnostics (standard residuals)
+
+```{r, echo=FALSE, warning=FALSE, out.width="100%"}
+stdr_res <- (mydata$lr - rev(model2_fit@fit$fitted.values)) / rev(model2_fit@fit$sigma)
+
+fig_std_res <- plot_ly(type = 'scatter', mode = 'lines')%>%
+  add_trace(x = row.names(df)[-c((l-1):l)], y = stdr_res,
+            line = list(color = my_colors["my_lblue"], width = 2))%>%
+  layout(showlegend = F, title='Standardized returns',
+         xaxis = list(rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(count=3, label="3y", step="year", stepmode="backward"),
+                          list(count=5, label="5y", step="year", stepmode="backward"),
+                          list(count=10, label="10y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))))
+fig_std_res <- fig_std_res %>%
+  layout(
+         xaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         yaxis = list(zerolinecolor = '#ffff',
+                      zerolinewidth = 2,
+                      gridcolor = 'ffff'),
+         plot_bgcolor='#e5ecf6')
+fig_std_res
+
+```
+
+```{r, echo=FALSE, fig.height = 4, out.width="100%"}
+
+acf_res <- acf(stdr_res, plot = FALSE)
+x1 = acf_res$lag[,,1][-1]
+y1 = acf_res$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_res$n.used),length(acf_res$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_res$n.used),length(acf_res$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"), title = 'ACF stdr_residual')
+acf_fig
+
+acf_res2 <- acf(stdr_res^2, plot = FALSE)
+x1 = acf_res2$lag[,,1][-1]
+y1 = acf_res2$acf[,,1][-1]
+y_975 = rep(1.96/sqrt(acf_res2$n.used),length(acf_res2$lag))[-1]
+y_025 = rep(-1.96/sqrt(acf_res2$n.used),length(acf_res2$lag))[-1]
+
+acf_fig <-  plot_ly(x = x1, y = y1, type = 'bar', name = 'ACF',
+                    marker = list(color = my_colors["my_lgreen"])) %>%
+            add_trace(x = x1, y = y_975, type = 'scatter',
+                      mode = 'lines+markers', name = '97.5%',
+                      line = list(color = my_colors["my_lred"], width = 1)) %>%
+            add_trace(x = x1, y = y_025, type = 'scatter',
+                      mode = 'lines+markers', name = '2.5%',
+                      line = list(color = my_colors["my_lred"], width = 1))
+acf_fig <- acf_fig %>% layout(yaxis = list(title = "ACF"),title='ACF (stdr_residual)^2')
+acf_fig
+
+```
+
+
+#### Standardized residuals
+
+* We can see that **volatility clusters are no longer present** in the standardized log-returns series. 
+* The ACF of $\hat{\epsilon}_t$ shows **no autocorrelation** suggesting that the **model for the conditional mean is appropriate**. 
+* The ACF of $\hat{\epsilon}_t^2$ shows **no autocorrelation** suggesting that we got **rid of the volatility clusters** and that the **order of the model is appropriate**.
+
+
