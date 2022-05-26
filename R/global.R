@@ -39,18 +39,8 @@ packages <- c(
 # Verify required packages are installed
 new_packs <- packages[!(packages %in% installed.packages())]
 if(length(new_packs)) install.packages(new_packs, dependencies = TRUE)
+rm(new_packs)
 
 # --- Load packages ---
 suppressPackageStartupMessages(lapply(packages, require, character.only = TRUE))
 
-rm(new_packs)
-
-#~~~~~~~ Temporary ~~~~~~~~~~~~~~~
-# 
-# library(actuar)
-# library(fitur)
-# library(tikzDevice)
-# library(extrafont)
-# library(remotes)
-# library(av)
-# font_import() # Loading fonts (takes a while)

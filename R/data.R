@@ -28,7 +28,9 @@ setwd(project_path)
 
 # --- Quandl Continuous Futures Contracts API
 
-#API_KEY <- "72Ej_NQjExJphWNbeyte"
+# Our API_KEY is safely stored in the config file
+source("config.R")
+
 #CME_W3 <- Quandl("CHRIS/CME_W3", api_key = API_KEY) # Wheat
 #CME_C3 <- Quandl("CHRIS/CME_C3", api_key = API_KEY, type = "xts") # Corn
 #CME_S3 <- Quandl("CHRIS/CME_S3", api_key = API_KEY) # Soybean
