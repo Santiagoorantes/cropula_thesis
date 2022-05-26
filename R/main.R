@@ -94,7 +94,7 @@ districts <- unique(filtered_df$district)
 
 # Summarise target data
 trgt_df <- filtered_df %>%
-  group_by(year, cycle, type , state, municipality) %>%
+  group_by(year, crop, cycle, type , state, municipality) %>%
   summarise(av_yield = sum(volume) / sum(sowed),
             av_price = sum(production_value) / sum(volume))
 
@@ -208,12 +208,14 @@ probs <- seq(0, 0.999, length.out = 1000)
 yield_Norm <- qnorm(probs, fit_norm$estimate[1], fit_norm$estimate[2])
 yield_Gamma <- qgamma(probs, fit_Gam$estimate[1], fit_Gam$estimate[2])
 yield_Weibull <- qweibull(probs, fit_Wei$estimate[1], fit_Wei$estimate[2])
-yield_BetaShift <- qbeta_shift(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2], a = a, b = b)
+yield_BetaShift <- qbeta_shift(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
+                               a = a, b = b)
 
 sim_Norm <- rnorm(10000, mean=fit_norm$estimate[1], sd=fit_norm$estimate[2])
 sim_Gamma <- rgamma(10000, shape=fit_Gam$estimate[1], rate=fit_Gam$estimate[2])
 sim_Weibull <- rweibull(10000, shape=fit_Wei$estimate[1], scale=fit_Wei$estimate[2])
-sim_BetaShift <- rbeta_shift(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2], a = a, b = b)
+sim_BetaShift <- rbeta_shift(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
+                             a = a, b = b)
 
 fit_df <- data.frame(yield_Norm, yield_Gamma, yield_Weibull, yield_BetaShift)
 fit_df <- fit_df %>% reshape2::melt(value.name = "yield_fit")
@@ -228,6 +230,7 @@ p <- ggplot(data.frame(yield_dt), aes(x = yield_dt)) +
                alpha = 0.4)+
   xlim(0,b+1)
 ggplotly(p + my_theme) 
+
 
 # ------------------------------------------------------------------------------
 # --- 3. Fit ARMA-GARCH model to the Price Series ---
@@ -280,12 +283,12 @@ plot(model_fit, which="all")
 # --- Actual residuals ---
 # Residuals to use for the copulas
 res <- residuals(model_fit)
-plot(res)
 
 
 # ------------------------------------------------------------------------------
 # --- 4. CROPULAS ---
 # ------------------------------------------------------------------------------
+
 
 # --- 4.1 Rank Correlations ---
 
@@ -311,7 +314,7 @@ for (i in seq_along(meth)) {
 stat_rho <- cor(yield_dt, price_dt, method = meth[3])
 
 years <- trgt_df$year
-roll <- 10
+roll <- 8
 rho <- numeric()
 for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = "spearman"))
@@ -408,7 +411,7 @@ for (i in seq_along(meth)) {
 stat_rho <- cor(yield_dt, trgt_res, method = meth[2])
 
 years <- price_res$year
-roll <- 8
+roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],trgt_res[i:(i+roll)],method = "kendall"))
@@ -423,7 +426,7 @@ fig <- ggplot() +
 ggMarginal(fig, type = "histogram", size = 3,
            fill = "steelblue",
            xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 6))
+           yparams = list(binwidth = 0.0005))
 
 
 

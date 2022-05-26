@@ -6,9 +6,9 @@
 
 # All the csv for the crop data are in the folder "info_agr"
 # All the downloaded price series were stored as csv in the folder "info_comm"
-project_path <- getwd()
-agr_data_path <- paste(getwd(), "/info_agr",sep = "")
-comm_data_path <- paste(getwd(), "/info_comm",sep = "")
+R_dir <- here()
+agr_data_path <- paste(here(..=1), "/info_agr",sep = "")
+comm_data_path <- paste(here(..=1), "/info_comm",sep = "")
 
 # --- 0.1 Crop data --- 
 
@@ -22,7 +22,7 @@ agr_files <- lapply(agr_files, setNames, col_names)
 agr_df <- do.call(rbind, agr_files)
 rm(agr_files)
 
-setwd(project_path)
+setwd(R_dir)
 
 # --- 0.2 Price data ---
 
@@ -44,6 +44,6 @@ source("config.R")
 
 setwd(comm_data_path)
 corn_ts <- read.csv("CME_C3_20210629.csv")
-setwd(project_path)
+setwd(R_dir)
 
 
