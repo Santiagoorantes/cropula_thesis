@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# --- 0. Sourcing packages, functions and data ---
+# --- 0. Loading packages, functions and data ---
 # ------------------------------------------------------------------------------
 
 # --- Load required packages ---
@@ -76,19 +76,21 @@ filtered_df <- filter_df(agr_df, my_filter)
 
 # Check if there are further distric divisions
 districts <- unique(filtered_df$district)
+names(my_filter)
 
-# Summarise target data
+group_vars <- c("year", names(my_filter))
+# DF of Yield and Price per year given filtered df
 trgt_df <- filtered_df %>%
-  group_by(year, crop, cycle, type , state, municipality) %>%
+  group_by(!!!syms(group_vars)) %>%
   summarise(
     av_yield = sum(volume) / sum(sowed),
     av_price = sum(production_value) / sum(volume)
   )
 
-
 # --- 2.1 Detrending the series ---
 
 # NOTE: make sure that there is only ONE value per year to detrend the series
+dim(trgt_df)
 
 yield <- as.numeric(trgt_df$av_yield)
 
