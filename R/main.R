@@ -359,6 +359,8 @@ ggMarginal(fig,
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 6))
 
+scatter_hist_2d(yield_dt, price_dt, type = "density")
+
 
 # --- Working with the residuals of the ARMA-GARCH ---
 
@@ -408,6 +410,7 @@ ggMarginal(fig,
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 0.0005))
 
+scatter_hist_2d(yield_dt, trgt_res, type = "density")
 
 
 # --- Marginals ---
@@ -427,21 +430,10 @@ y <- pshift_beta(sim_y, params["alpha"], params["beta"], a, b)
 ag_params <- coef(model_fit)
 nu <- coef(model_fit)["shape"]
 sim_t <- rt(n, nu)
-
 # CDF
 x <- pt(sim_t, df = nu)
 
-fig <- ggplot() + 
-  geom_point(aes(x = sim_y, y = sim_t), 
-             colour = "steelblue",
-             size = 2)
-ggMarginal(fig,
-           type = "histogram",
-           size = 3,
-           fill = "steelblue",
-           xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 1))
-
+scatter_hist_2d(x = sim_y, y = sim_t, type = "hexbin")
 
 # --- Fitting the Copulas ---
 
@@ -485,17 +477,10 @@ Y <- qshift_beta(u, params["alpha"], params["beta"], a, b)
 # Simulated values of the residuals of the lr of the Price
 X <- qt(v,  nu)
 
-fig <- ggplot() + 
-  geom_point(aes(x = Y, y = (-sign(tau)) * X), 
-             colour = "steelblue",
-             size = 2)
-ggMarginal(fig, type = "histogram",
-           size = 3,
-           fill = "steelblue",
-           xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 0.5))
+scatter_hist_2d(Y, (-sign(tau)) * X, type = "density")
+scatter_hist_2d(Y, (-sign(tau)) * X, type = "hexbin")
 
-
+p_dens$rownames
 
 # VineCopula
 #fit_Cop <- BiCopSelect(Y, P, familyset = NA)

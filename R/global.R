@@ -20,6 +20,7 @@ packages <- c(
   "scales",
   "plotly",
   "gganimate",
+  "hexbin",
   
   # Price series
   "Quandl",
