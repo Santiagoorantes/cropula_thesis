@@ -8,8 +8,11 @@ source("global.R")
 # --- Load raw data ---
 source("data.R")
 
-# --- Load Pearson plot ---
-source("fullPearsonPlot.R")
+# --- Load Utilities ---
+folders <- c("utilities")
+file_sources <- list.files(folders, pattern = "\\.R$", full.names = TRUE)
+sapply(file_sources, source, .GlobalEnv)
+
 
 # ------------------------------------------------------------------------------
 # --- 1. Data preparation ---
@@ -25,34 +28,33 @@ end_date <- as.Date("2020-12-31")
 corn_ts <- dplyr::filter(corn_ts, Date >= ini_date, Date <= end_date)
 
 
-## Before working with the SIAP df (agr_df) we will change the column names
-## to their English equivalent in a standardized format.
-
-colnames(agr_df) <- c("year",
-                      "id_state",
-                      "state",
-                      "id_district",  
-                      "district", # DDR (rural-development-district)
-                      "id_cader",
-                      "cader", # Further split of the DDR
-                      "id_municipality",
-                      "municipality",
-                      "id_cycle",
-                      "cycle",
-                      "id_type",
-                      "type",
-                      "id_unit",
-                      "unit",
-                      "id_crop",
-                      "crop",
-                      "sowed",
-                      "harvested",
-                      "damaged",
-                      "volume",
-                      "yield",
-                      "price",
-                      "production_value")
-
+## Change column_names of SIAP db (agr_df) to their English equivalent.
+colnames(agr_df) <- c(
+  "year",
+  "id_state",
+  "state",
+  "id_district",  
+  "district", # DDR (rural-development-district)
+  "id_cader",
+  "cader", # Further split of the DDR
+  "id_municipality",
+  "municipality",
+  "id_cycle",
+  "cycle",
+  "id_type",
+  "type",
+  "id_unit",
+  "unit",
+  "id_crop",
+  "crop",
+  "sowed",
+  "harvested",
+  "damaged",
+  "volume",
+  "yield",
+  "price",
+  "production_value"
+)
 
 # ------------------------------------------------------------------------------
 # --- 2. Fit empirical and parametric marginals for the Yield ---
@@ -60,43 +62,28 @@ colnames(agr_df) <- c("year",
 
 # --- 2.0 Applying filters ---
 
-# Filter crop and conditions of interest
+# Define filter
+my_filter <-  list(
+  crop = c("Maíz grano"),
+  type = c("Riego"),
+  cycle = c("Otoño-Invierno"),
+  state = c("Sinaloa"),
+  municipality = c("Guasave")
+)
 
-cropFilter <- function(df, my_filter){
-  
-  # check if filter cols are in df and only keep those
-  filter_cols <- names(my_filter)
-  cols_in_df <- which(filter_cols %in% names(df))
-  my_filter <- my_filter[cols_in_df]
-  
-  # filter df
-  for (i in 1:length(my_filter)) {
-    df <- df %>% 
-      filter(eval(sym(names(my_filter)[i])) %in% my_filter[[i]])
-  }
-  
-  return(df)
+# Filter target crop data 
+filtered_df <- filter_df(agr_df, my_filter)
 
-}
-
-# define filter
-my_filter <-  list(crop = c("Maíz grano"),
-                   type = c("Riego"),
-                   cycle = c("Otoño-Invierno"),
-                   state = c("Sinaloa"),
-                   municipality = c("Guasave"))
-
-# filter target crop data 
-filtered_df <- cropFilter(agr_df, my_filter)
-
-# check if there are further distric divisions
+# Check if there are further distric divisions
 districts <- unique(filtered_df$district)
 
 # Summarise target data
 trgt_df <- filtered_df %>%
   group_by(year, crop, cycle, type , state, municipality) %>%
-  summarise(av_yield = sum(volume) / sum(sowed),
-            av_price = sum(production_value) / sum(volume))
+  summarise(
+    av_yield = sum(volume) / sum(sowed),
+    av_price = sum(production_value) / sum(volume)
+  )
 
 
 # --- 2.1 Detrending the series ---
@@ -109,7 +96,7 @@ l <- length(yield)
 t <- seq(1, l, 1)
 
 # Note: the simple linear regression for the yield was sufficient,
-# anything of higher order was not significant
+# anything of higher order was not significant.
 
 # y_t = alpha + beta*T + e_t
 model <- glm(yield ~ t)
@@ -135,7 +122,7 @@ Box.test(yield_dt^2, lag = 1, type = "Ljung")
 # --- 2.2 Fitting distributions to the YIELD ---
 
 # Pearson (based on Cullen and Frey) plots
-fullPearsonPlot(yield_dt, boot = 1000, method = "sample", alpha = 0.7)
+pearson_plot(yield_dt, boot = 1000, method = "sample", alpha = 0.7)
 
 # Normal distribution
 fit_norm <- fitdist(yield_dt, distr = "norm", method = "mle")
@@ -155,25 +142,7 @@ a <- 0
 b <- ceiling(max(yield_dt) + sd(yield_dt))
 b <- ceiling(max(yield_dt))
 
-# Bulding the Shifted Beta distribution with min=a, max=b
-dbeta_shift <- function(x, alpha, beta, a = 0, b = 1){
-  1/(b-a) * dbeta((x-a)/(b-a), shape1 = alpha, shape2 = beta)
-}
-
-pbeta_shift <- function(q, alpha, beta, a = 0, b = 1){
-  pbeta((q-a)/(b-a), shape1 = alpha, shape2 = beta)
-}
-
-qbeta_shift <- function(p, alpha, beta, a = 0, b = 1){
-  (b-a) * qbeta(p, shape1 = alpha, shape2 = beta) + a
-}
-
-rbeta_shift <- function(n, alpha, beta, a = 0, b = 1){
-  sim <- rbeta(n, alpha, beta)
-  a + (b-a) * sim
-}
-
-fit_BetaShift <- fitdist(yield_dt, distr = "beta_shift",
+fit_BetaShift <- fitdist(yield_dt, distr = "shift_beta",
                        start = list(alpha = 10, beta = 1),
                        fix.arg = list(a = a, b = b),
                        method = c("mle"))
@@ -188,8 +157,6 @@ fitted_dists <- list(fit_norm, fit_Gam, fit_Wei, fit_BetaShift)
 gof <- gofstat(fitted_dists)
 qqcomp(fitted_dists)
 cdfcomp(fitted_dists)
-
-
 
 # DataFrame of Goodness-of-fit
 (gof_df <- data.frame("KS" = gof$ks,
@@ -208,13 +175,13 @@ probs <- seq(0, 0.999, length.out = 1000)
 yield_Norm <- qnorm(probs, fit_norm$estimate[1], fit_norm$estimate[2])
 yield_Gamma <- qgamma(probs, fit_Gam$estimate[1], fit_Gam$estimate[2])
 yield_Weibull <- qweibull(probs, fit_Wei$estimate[1], fit_Wei$estimate[2])
-yield_BetaShift <- qbeta_shift(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
+yield_BetaShift <- qshift_beta(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
                                a = a, b = b)
 
 sim_Norm <- rnorm(10000, mean=fit_norm$estimate[1], sd=fit_norm$estimate[2])
 sim_Gamma <- rgamma(10000, shape=fit_Gam$estimate[1], rate=fit_Gam$estimate[2])
 sim_Weibull <- rweibull(10000, shape=fit_Wei$estimate[1], scale=fit_Wei$estimate[2])
-sim_BetaShift <- rbeta_shift(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
+sim_BetaShift <- rshift_beta(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
                              a = a, b = b)
 
 fit_df <- data.frame(yield_Norm, yield_Gamma, yield_Weibull, yield_BetaShift)
@@ -223,12 +190,19 @@ fit_df <- fit_df %>% reshape2::melt(value.name = "yield_fit")
 # Histogram - comparing fitted density plots vs actual data
 bw <- 0.5
 p <- ggplot(data.frame(yield_dt), aes(x = yield_dt)) + 
-  geom_histogram(aes(y = ..density..), binwidth = bw, color = "white") +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = bw,
+                 color = "white") +
   geom_density(data = fit_df, 
-               aes(y = ..density.. / bw, x = yield_fit,
-                   color = variable, fill = variable),
-               alpha = 0.4)+
-  xlim(0,b+1)
+               aes(
+                 y = ..density.. / bw,
+                 x = yield_fit,
+                 color = variable,
+                 fill = variable
+               ),
+               alpha = 0.4) +
+  xlim(0, b + 1)
+
 ggplotly(p + my_theme) 
 
 
@@ -279,7 +253,6 @@ sim_t <- rt(10000, nu)
 
 plot(model_fit, which="all")
 
-
 # --- Actual residuals ---
 # Residuals to use for the copulas
 res <- residuals(model_fit)
@@ -289,7 +262,6 @@ res <- residuals(model_fit)
 # --- 4. CROPULAS ---
 # ------------------------------------------------------------------------------
 
-
 # --- 4.1 Rank Correlations ---
 
 # Option 1: SIAP Price (detrended)
@@ -297,7 +269,7 @@ p <- trgt_df$av_price
 l <- length(p)
 t <- seq(1, l, 1)
 
-model <- lm(p~t)
+model <- lm(p ~ t)
 price_dt <- model$fitted.values[l] * (1 + model$residuals / model$fitted.values)
 
 
@@ -334,7 +306,7 @@ harvest_price <- data.frame("year" = year(dates),
                             "price" = corn_ts$Settle)
 
 # May and June are the months where almost all of the harvest happens
-harvest_months <- c(5,6)
+harvest_months <- c(5, 6)
 harvest_price <- harvest_price %>%
   group_by(year) %>%
   filter(month %in% harvest_months) %>%
@@ -378,8 +350,11 @@ ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
 # We can notice at least some of the negative correlation
 fig <- ggplot() + 
   geom_point(aes(x = yield_dt, y = price_dt), 
-             colour = "steelblue", size = 2)
-ggMarginal(fig, type = "histogram", size = 3,
+             colour = "steelblue",
+             size = 2)
+ggMarginal(fig,
+           type = "histogram",
+           size = 3,
            fill = "steelblue",
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 6))
@@ -388,10 +363,12 @@ ggMarginal(fig, type = "histogram", size = 3,
 # --- Working with the residuals of the ARMA-GARCH ---
 
 dates <- date(res)
-price_res <- data.frame("year" = year(dates),
-                        "month" = month(dates),
-                        "day" = day(dates),
-                        "residual" = res)
+price_res <- data.frame(
+  "year" = year(dates),
+  "month" = month(dates),
+  "day" = day(dates),
+  "residual" = res
+)
 
 # May and June are the months where almost all of the harvest happens
 harvest_months <- c(5,6)
@@ -422,8 +399,11 @@ ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
 # We can notice at least some of the negative correlation
 fig <- ggplot() + 
   geom_point(aes(x = yield_dt, y = trgt_res), 
-             colour = "steelblue", size = 2)
-ggMarginal(fig, type = "histogram", size = 3,
+             colour = "steelblue",
+             size = 2)
+ggMarginal(fig,
+           type = "histogram",
+           size = 3,
            fill = "steelblue",
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 0.0005))
@@ -437,10 +417,11 @@ n <- 10000
 
 # Shifted Beta dist
 params <- coef(fit_BetaShift)
-sim_y <- rbeta_shift(n, alpha = params["alpha"], beta = params["beta"],
+sim_y <- rshift_beta(n,
+                     alpha = params["alpha"], beta = params["beta"],
                      a = a, b = b)
 # CDF 
-y <- pbeta_shift(sim_y, params["alpha"], params["beta"], a, b)
+y <- pshift_beta(sim_y, params["alpha"], params["beta"], a, b)
 
 # t-dist for the price (ARMA-GARCH residuals)
 ag_params <- coef(model_fit)
@@ -452,8 +433,11 @@ x <- pt(sim_t, df = nu)
 
 fig <- ggplot() + 
   geom_point(aes(x = sim_y, y = sim_t), 
-             colour = "steelblue", size = 2)
-ggMarginal(fig, type = "histogram", size = 3,
+             colour = "steelblue",
+             size = 2)
+ggMarginal(fig,
+           type = "histogram",
+           size = 3,
            fill = "steelblue",
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 1))
@@ -463,7 +447,7 @@ ggMarginal(fig, type = "histogram", size = 3,
 
 # Implicit theta value for a given tau
 d <- 2
-nonegacops <- list(gumbelCopula(dim = d),
+noneg_acops <- list(gumbelCopula(dim = d),
                    claytonCopula(dim = d),
                    joeCopula(dim = d))
 acops <- list(amhCopula(dim = d),
@@ -477,7 +461,7 @@ i <- 1
 mycop <- acops[[i]]
 
 # Kendall's tau
-tau <- ifelse(list(mycop) %in% noneg_cops, abs(stat_rho), stat_rho)
+tau <- ifelse(list(mycop) %in% noneg_acops, abs(stat_rho), stat_rho)
 
 # Corresponding parameter of the Archimedian Cop
 theta <- iTau(mycop, tau)
@@ -497,18 +481,19 @@ simcop <- rCopula(n, mycop)
 u <- simcop[,1]
 v <- simcop[,2]
 # Simulated values of the Yield
-Y <- qbeta_shift(u, params["alpha"], params["beta"], a, b)
+Y <- qshift_beta(u, params["alpha"], params["beta"], a, b)
 # Simulated values of the residuals of the lr of the Price
 X <- qt(v,  nu)
 
 fig <- ggplot() + 
   geom_point(aes(x = Y, y = (-sign(tau)) * X), 
-             colour = "steelblue", size = 2)
-ggMarginal(fig, type = "histogram", size = 3,
+             colour = "steelblue",
+             size = 2)
+ggMarginal(fig, type = "histogram",
+           size = 3,
            fill = "steelblue",
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 0.5))
-
 
 
 
