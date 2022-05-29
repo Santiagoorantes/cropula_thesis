@@ -76,7 +76,6 @@ filtered_df <- filter_df(agr_df, my_filter)
 
 # Check if there are further distric divisions
 districts <- unique(filtered_df$district)
-names(my_filter)
 
 group_vars <- c("year", names(my_filter))
 # DF of Yield and Price per year given filtered df
@@ -90,14 +89,13 @@ trgt_df <- filtered_df %>%
 # --- 2.1 Detrending the series ---
 
 # NOTE: make sure that there is only ONE value per year to detrend the series
-dim(trgt_df)
+nrow(trgt_df) == length(unique(trgt_df$year))
 
 yield <- as.numeric(trgt_df$av_yield)
-
 l <- length(yield)
 t <- seq(1, l, 1)
 
-# Note: the simple linear regression for the yield was sufficient,
+# The simple linear regression for the yield was sufficient,
 # anything of higher order was not significant.
 
 # y_t = alpha + beta*T + e_t
@@ -128,15 +126,12 @@ pearson_plot(yield_dt, boot = 1000, method = "sample", alpha = 0.7)
 
 # Normal distribution
 fit_norm <- fitdist(yield_dt, distr = "norm", method = "mle")
-summary(fit_norm)
 
 # Gamma distribution
 fit_Gam <- fitdist(yield_dt, distr = "gamma", method = "mle")
-summary(fit_Gam)
 
 # Weibull distribution
 fit_Wei <- fitdist(yield_dt, distr = "weibull", method = "mle")
-summary(fit_Wei)
 
 # Beta distribution
 a <- 0
@@ -148,9 +143,6 @@ fit_BetaShift <- fitdist(yield_dt, distr = "shift_beta",
                        start = list(alpha = 10, beta = 1),
                        fix.arg = list(a = a, b = b),
                        method = c("mle"))
-summary(fit_BetaShift)
-
-
 
 # --- Comparing fitted distributions ---
 
@@ -171,9 +163,7 @@ full_names <- c("Kolmogorov-Smirnov statistic", "Cramer-von Mises statistic",
                   "Anderson-Darling statistic", "Akaike's Information Criterion",
                   "Bayesian Information Criterion")
 
-
-
-probs <- seq(0, 0.999, length.out = 1000)
+probs <- seq(0, 0.9999, length.out = 1000)
 yield_Norm <- qnorm(probs, fit_norm$estimate[1], fit_norm$estimate[2])
 yield_Gamma <- qgamma(probs, fit_Gam$estimate[1], fit_Gam$estimate[2])
 yield_Weibull <- qweibull(probs, fit_Wei$estimate[1], fit_Wei$estimate[2])
@@ -205,7 +195,8 @@ p <- ggplot(data.frame(yield_dt), aes(x = yield_dt)) +
                alpha = 0.4) +
   xlim(0, b + 1)
 
-ggplotly(p + my_theme) 
+  p + my_theme +
+    theme(legend.position = "bottom")
 
 
 # ------------------------------------------------------------------------------
@@ -261,6 +252,54 @@ res <- residuals(model_fit)
 
 
 # ------------------------------------------------------------------------------
+# Forecasting / Simulating Paths
+
+# Forecasting
+model_forc <- ugarchforecast(model_fit, n.ahead = 100)
+plot(model_forc, which = 1)
+plot(model_forc, which = 3)
+
+# Simulation
+days <- 180
+nsim <- 1000
+model_sim <- ugarchsim(model_fit, n.sim = days,
+                       n.start = 1, m.sim = nsim,
+                       startMethod = "sample")
+
+#plot(model_sim)
+
+class(model_sim@simulation)
+
+# Simulated log-returns
+lr_sim <- model_sim@simulation$seriesSim
+# Last Price of the dataset
+p_0 <- corn_ts$Settle[1]
+exp_lr <- exp(lr_sim)
+x <- rbind(rep(p_0, nsim), exp_lr)
+# Simulated Prices
+p_t <- apply(x, 2, cumprod)
+
+# Plotting the paths
+alpha <- 0.05
+uq <- 1 - alpha/2
+lq <- 1 - uq
+uq_t <- apply(p_t, 1, function(x) quantile(x, uq))
+lq_t <- apply(p_t, 1, function(x) quantile(x, lq))
+matplot(x = seq(0, days, length.out = nrow(p_t)), y = p_t,
+        type = "l", lty = 1, col = 4:5,
+        main = "Simulated paths ARMA(1,1)-GARCH(1,1)",
+        xlab = "t", ylab = "Price (USD)")
+lines(x = seq(0, days, length.out = nrow(p_t)), y = uq_t,
+      lty = 3, lwd = 3, col = "red")
+lines(x = seq(0, days, length.out = nrow(p_t)), y = lq_t,
+      lty = 3, lwd = 3, col = "red")
+legend("topleft",legend = c(paste0("quant_", uq), paste0("quant_", lq)),
+       cex = 1, col=c("red", "red"), lty = c(3,3), lwd = c(3,3))
+
+boxplot(p_t[days,])
+
+
+# ------------------------------------------------------------------------------
 # --- 4. CROPULAS ---
 # ------------------------------------------------------------------------------
 
@@ -288,13 +327,14 @@ for (i in seq_along(meth)) {
 stat_rho <- cor(yield_dt, price_dt, method = meth[3])
 
 years <- trgt_df$year
-roll <- 8
+roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = "spearman"))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0)
+  geom_abline(intercept = stat_rho, slope = 0) +
+  ylim(c(-1,1))
 
 # Option 2: CME-based harvest price
 # (Prices in CME are in USD cents per bushel)
@@ -316,9 +356,7 @@ harvest_price <- harvest_price %>%
   mutate(USD_tonne = av_price/100 * bush_tonne)
 
 p <- harvest_price$USD_tonne
-
 plot(p, type="l")
-
 
 # Correlation of original vs detrended CME price series
 l <- length(p)
@@ -341,13 +379,14 @@ for (i in seq_along(meth)) {
 stat_rho <- cor(yield_dt, price_dt, method = meth[2])
 
 years <- trgt_df$year
-roll <- 8
+roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = "kendall"))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0)
+  geom_abline(intercept = stat_rho, slope = 0) +
+  ylim(c(-1,1))
 
 # We can notice at least some of the negative correlation
 fig <- ggplot() + 
@@ -382,7 +421,6 @@ price_res <- price_res %>%
   summarise(av_res = mean(residual))
 
 trgt_res <- price_res$av_res
-
 plot(trgt_res, type="l")
 
 # Rank Correlation with the detrended yields
@@ -398,7 +436,8 @@ for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],trgt_res[i:(i+roll)],method = "kendall"))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0)
+  geom_abline(intercept = stat_rho, slope = 0) +
+  ylim(c(-1,1))
 
 # We can notice at least some of the negative correlation
 fig <- ggplot() + 
@@ -481,11 +520,35 @@ X <- qt(v,  nu)
 
 scatter_hist_2d(Y, (-sign(tau)) * X, type = "density")
 scatter_hist_2d(Y, (-sign(tau)) * X, type = "hexbin")
+ 
 
-p_dens$rownames
+# --- Fitting and Goodness-of-Fit ---
+
+# The gof test is suuper slow so we decrease n
+simcop <- rCopula(1000, mycop)
+obs  <- pobs(simcop)
+fit_mpl <- fitCopula(mycop, obs, method = "mpl")
+fit_ml <- fitCopula(mycop, simcop, method = "ml", traceOpt=TRUE)
+summary(fit_mpl)
+summary(fit_ml)
+
+AIC(fit_mpl)
+AIC(fit_ml)
+BIC(fit_mpl)
+BIC(fit_ml)
+
+N <- 100
+gof <- gofCopula(mycop, simcop, N = N, method = "Sn", estim.method = "ml")
+gofCopula(mycop, simcop, N = N, method = "SnB")
+
 
 # VineCopula
 #fit_Cop <- BiCopSelect(Y, P, familyset = NA)
+
+
+# ------------------------------------------------------------------------------
+# --- TEST: Parametric fit to Price ---
+# ------------------------------------------------------------------------------
 
 # Price parametric dists just for fun
 
@@ -498,7 +561,7 @@ summary(test_fit3)
 test_fit4 <- fitdist(price_dt, distr = "gamma")
 summary(test_fit4)  
 test_fit5 <- fitdist(price_dt, distr = "Gumbel",
-                    start = list(location = 0, scale = 1))
+                     start = list(location = 0, scale = 1))
 summary(test_fit5)  
 
 # Goodness of fit statistics and criteria
@@ -521,10 +584,4 @@ sim_Gum <- rGumbel(n, location = params["location"], scale = params["scale"])
 # CDF
 P_Gum <- pGumbel(sim_Gum, params["location"], params["scale"])
 
-fig <- ggplot() + 
-  geom_point(aes(x = sim_y, y = sim_Gum), 
-             colour = "steelblue", size = 2)
-ggMarginal(fig, type = "histogram", size = 3,
-           fill = "steelblue",
-           xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 10))
+scatter_hist_2d(sim_y, sim_Gum, type = "hexbin")

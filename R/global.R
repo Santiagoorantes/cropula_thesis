@@ -5,6 +5,7 @@
 packages <- c(
   
   "this.path",
+  
   # data manipulation
   "tidyverse",
   "reshape",
@@ -30,6 +31,7 @@ packages <- c(
   "fitdistrplus",
   "ExtDist",
   "VGAM",
+  "actuar",
   
   # Copulas
   "copula",
