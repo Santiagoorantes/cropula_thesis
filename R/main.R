@@ -136,8 +136,10 @@ fit_Wei <- fitdist(yield_dt, distr = "weibull", method = "mle")
 # Beta distribution
 a <- 0
 # Should the additional parameter "b" be taken into account in the AIC and BIC?
-b <- ceiling(max(yield_dt) + sd(yield_dt))
-b <- ceiling(max(yield_dt))
+# Check how different levels of epsilon change the fit and the price of the insurance
+# Sensitivity wrt eps
+eps <- 0.3
+b <- ceiling(max(yield_dt) + eps * sd(yield_dt))
 
 fit_BetaShift <- fitdist(yield_dt, distr = "shift_beta",
                        start = list(alpha = 10, beta = 1),
@@ -252,23 +254,17 @@ res <- residuals(model_fit)
 
 
 # ------------------------------------------------------------------------------
-# Forecasting / Simulating Paths
-
-# Forecasting
-model_forc <- ugarchforecast(model_fit, n.ahead = 100)
-plot(model_forc, which = 1)
-plot(model_forc, which = 3)
+# Simulating Paths
 
 # Simulation
 days <- 180
-nsim <- 1000
+nsim <- 10000
+set.seed(123)
 model_sim <- ugarchsim(model_fit, n.sim = days,
                        n.start = 1, m.sim = nsim,
                        startMethod = "sample")
 
 #plot(model_sim)
-
-class(model_sim@simulation)
 
 # Simulated log-returns
 lr_sim <- model_sim@simulation$seriesSim
@@ -296,7 +292,27 @@ lines(x = seq(0, days, length.out = nrow(p_t)), y = lq_t,
 legend("topleft",legend = c(paste0("quant_", uq), paste0("quant_", lq)),
        cex = 1, col=c("red", "red"), lty = c(3,3), lwd = c(3,3))
 
-boxplot(p_t[days,])
+summary(p_t[days,])
+
+end_p <- p_t[days,]
+end_avp <- apply(p_t[(days-30):days,], 2, mean)
+plot_df <- data.frame("Final_Price" = end_p,
+                      "Final_1m_avPrice" = end_avp) 
+melt_df <- reshape2::melt(plot_df)
+ggplot(melt_df) +
+  geom_histogram(aes(y = ..density.., x = value, fill = variable),
+                 position = "dodge", bins = 30) +
+  labs(title = "Final vs Last Month Average (Price)") + 
+  xlab("Price (USD)")
+
+
+# Empirical Distribution of the simulated prices
+plot(ecdf(end_avp))
+emp_cdf <- ecdf(end_avp)
+quantile(emp_cdf, 0.99)
+
+# Quantiles of the empirical distribution
+price_quantiles <- emp_cdf(end_avp)
 
 
 # ------------------------------------------------------------------------------
@@ -324,13 +340,13 @@ for (i in seq_along(meth)) {
 for (i in seq_along(meth)) {
   print(cor(yield_dt, price_dt, method = meth[i]))
 }
-stat_rho <- cor(yield_dt, price_dt, method = meth[3])
+stat_rho <- cor(yield_dt, price_dt, method = meth[2])
 
 years <- trgt_df$year
 roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = "spearman"))
+  rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = meth[2]))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
   geom_abline(intercept = stat_rho, slope = 0) +
@@ -363,8 +379,9 @@ l <- length(p)
 t <- seq(1, l, 1)
 
 model <- lm(p~t)
+# In this case, t is not significant so we can use the price directly
+summary(model)
 price_dt <- model$fitted.values[l] * (1 + model$residuals / model$fitted.values)
-
 
 # Correlation
 meth <- c("pearson", "kendall", "spearman")
@@ -376,21 +393,22 @@ for (i in seq_along(meth)) {
 for (i in seq_along(meth)) {
   print(cor(yield_dt, price_dt, method = meth[i]))
 }
-stat_rho <- cor(yield_dt, price_dt, method = meth[2])
+# I this case we use the price directly
+stat_rho_real <- cor(yield_dt, p, method = meth[2])
 
 years <- trgt_df$year
 roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = "kendall"))
+  rho[i] <- (cor(yield_dt[i:(i+roll)],p[i:(i+roll)],method = "kendall"))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0) +
+  geom_abline(intercept = stat_rho_real, slope = 0) +
   ylim(c(-1,1))
 
 # We can notice at least some of the negative correlation
 fig <- ggplot() + 
-  geom_point(aes(x = yield_dt, y = price_dt), 
+  geom_point(aes(x = yield_dt, y = p), 
              colour = "steelblue",
              size = 2)
 ggMarginal(fig,
@@ -400,10 +418,10 @@ ggMarginal(fig,
            xparams = list(binwidth = 0.5),
            yparams = list(binwidth = 6))
 
-scatter_hist_2d(yield_dt, price_dt, type = "density")
+scatter_hist_2d(yield_dt, p, type = "density")
 
 
-# --- Working with the residuals of the ARMA-GARCH ---
+# --- Option 3: Working with the residuals of the ARMA-GARCH ---
 
 dates <- date(res)
 price_res <- data.frame(
@@ -433,7 +451,7 @@ years <- price_res$year
 roll <- 10
 rho <- numeric()
 for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],trgt_res[i:(i+roll)],method = "kendall"))
+  rho[i] <- (cor(yield_dt[i:(i+roll)],trgt_res[i:(i+roll)],method = meth[2]))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
   geom_abline(intercept = stat_rho, slope = 0) +
@@ -458,7 +476,6 @@ scatter_hist_2d(yield_dt, trgt_res, type = "density")
 # We have our marginals for the yield and price
 
 n <- 10000
-
 # Shifted Beta dist
 params <- coef(fit_BetaShift)
 sim_y <- rshift_beta(n,
@@ -467,14 +484,8 @@ sim_y <- rshift_beta(n,
 # CDF 
 y <- pshift_beta(sim_y, params["alpha"], params["beta"], a, b)
 
-# t-dist for the price (ARMA-GARCH residuals)
-ag_params <- coef(model_fit)
-nu <- coef(model_fit)["shape"]
-sim_t <- rt(n, nu)
-# CDF
-x <- pt(sim_t, df = nu)
-
-scatter_hist_2d(x = sim_y, y = sim_t, type = "hexbin")
+# Empirical CDF of the price
+emp_cdf_p <- ecdf(end_avp / 100 * bush_tonne)
 
 # --- Fitting the Copulas ---
 
@@ -486,15 +497,16 @@ noneg_acops <- list(gumbelCopula(dim = d),
 acops <- list(amhCopula(dim = d),
              frankCopula(dim = d))
 cops <- list(normalCopula(dim = d),
-             tCopula(dim = d),
-             fgmCopula(dim = d))
+             tCopula(dim = d))
 
 # Choose Copula
+
 i <- 1
-mycop <- acops[[i]]
+mycop <- cops[[i]]
 
 # Kendall's tau
-tau <- ifelse(list(mycop) %in% noneg_acops, abs(stat_rho), stat_rho)
+nonneg <- list(mycop) %in% noneg_acops
+tau <- ifelse(nonneg, abs(stat_rho_real), stat_rho_real)
 
 # Corresponding parameter of the Archimedian Cop
 theta <- iTau(mycop, tau)
@@ -513,22 +525,29 @@ mycop
 simcop <- rCopula(n, mycop)
 u <- simcop[,1]
 v <- simcop[,2]
+
+# If Tau < 0, for noneg_acops we flip around the x axis (u)
+if(nonneg) u = 1 - u
+
 # Simulated values of the Yield
 Y <- qshift_beta(u, params["alpha"], params["beta"], a, b)
+
 # Simulated values of the residuals of the lr of the Price
 X <- qt(v,  nu)
+# quantiles of the prices
+X <- quantile(emp_cdf_p, v)
 
-scatter_hist_2d(Y, (-sign(tau)) * X, type = "density")
-scatter_hist_2d(Y, (-sign(tau)) * X, type = "hexbin")
- 
+scatter_hist_2d(u, v, type = "density")
+scatter_hist_2d(Y, X, type = "hexbin")
 
 # --- Fitting and Goodness-of-Fit ---
 
 # The gof test is suuper slow so we decrease n
 simcop <- rCopula(1000, mycop)
-obs  <- pobs(simcop)
+empcop <- matrix(cbind(yield_dt, p), ncol = 2)
+obs  <- pobs(empcop)
 fit_mpl <- fitCopula(mycop, obs, method = "mpl")
-fit_ml <- fitCopula(mycop, simcop, method = "ml", traceOpt=TRUE)
+fit_ml <- fitCopula(mycop, obs, method = "ml", traceOpt=TRUE)
 summary(fit_mpl)
 summary(fit_ml)
 
@@ -538,50 +557,8 @@ BIC(fit_mpl)
 BIC(fit_ml)
 
 N <- 100
-gof <- gofCopula(mycop, simcop, N = N, method = "Sn", estim.method = "ml")
-gofCopula(mycop, simcop, N = N, method = "SnB")
+gof <- gofCopula(mycop, empcop, N = N, method = "Sn", estim.method = "ml")
+gof
+gofCopula(mycop, empcop, N = N, method = "SnB")
 
 
-# VineCopula
-#fit_Cop <- BiCopSelect(Y, P, familyset = NA)
-
-
-# ------------------------------------------------------------------------------
-# --- TEST: Parametric fit to Price ---
-# ------------------------------------------------------------------------------
-
-# Price parametric dists just for fun
-
-test_fit1 <- fitdist(price_dt, distr = "weibull")
-summary(test_fit1)  
-test_fit2 <- fitdist(price_dt, distr = "norm")
-summary(test_fit2)  
-test_fit3 <- fitdist(price_dt, distr = "lnorm")
-summary(test_fit3)  
-test_fit4 <- fitdist(price_dt, distr = "gamma")
-summary(test_fit4)  
-test_fit5 <- fitdist(price_dt, distr = "Gumbel",
-                     start = list(location = 0, scale = 1))
-summary(test_fit5)  
-
-# Goodness of fit statistics and criteria
-fitted_dists <- list(test_fit1, test_fit2, test_fit3, test_fit4, test_fit5)
-gof <- gofstat(fitted_dists)
-qqcomp(fitted_dists)
-cdfcomp(fitted_dists)
-
-# DataFrame of Goodness-of-fit
-(gof_df <- data.frame("KS" = gof$ks,
-                      "CvM" = gof$cvm,
-                      "AD" = gof$ad,
-                      "AIC" = gof$aic,
-                      "BIC" = gof$bic))
-
-# Gumbel-dist for the detrended price
-params <- coef(test_fit5)
-sim_Gum <- rGumbel(n, location = params["location"], scale = params["scale"])
-
-# CDF
-P_Gum <- pGumbel(sim_Gum, params["location"], params["scale"])
-
-scatter_hist_2d(sim_y, sim_Gum, type = "hexbin")
