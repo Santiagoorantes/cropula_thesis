@@ -146,7 +146,7 @@ fit_BetaShift <- fitdist(yield_dt, distr = "shift_beta",
                        fix.arg = list(a = a, b = b),
                        method = c("mle"))
 
-# --- Comparing fitted distributions ---
+# --- 2.3 Comparing fitted distributions ---
 
 # Goodness of fit statistics and criteria
 fitted_dists <- list(fit_norm, fit_Gam, fit_Wei, fit_BetaShift)
@@ -214,8 +214,6 @@ settle_price <- corn_ts$Settle
 lr <- diff(log(settle_price))[-1]
 l <- length(lr)
 
-# --- 3.0 Analyzing the Series ---
-
 # --- 3.1 Model fit using the "rugarch" package ---
 
 # Create the model, specify the variance.model, the mean.model and the distribution.model
@@ -249,17 +247,15 @@ sim_t <- rt(10000, nu)
 plot(model_fit, which="all")
 
 # --- Actual residuals ---
-# Residuals to use for the copulas
 res <- residuals(model_fit)
 
-
 # ------------------------------------------------------------------------------
-# Simulating Paths
+# --- 3.2 Simulating Paths ---
 
 # Simulation
 days <- 180
 nsim <- 10000
-set.seed(123)
+#set.seed(123)
 model_sim <- ugarchsim(model_fit, n.sim = days,
                        n.start = 1, m.sim = nsim,
                        startMethod = "sample")
@@ -316,12 +312,12 @@ price_quantiles <- emp_cdf(end_avp)
 
 
 # ------------------------------------------------------------------------------
-# --- 4. CROPULAS ---
+# --- 4. Rank Correlation ---
 # ------------------------------------------------------------------------------
 
-# --- 4.1 Rank Correlations ---
+# --- 4.1 Empirical Correlations ---
 
-# Option 1: SIAP Price (detrended)
+# /// Option 1: SIAP Price (detrended) ///
 p <- trgt_df$av_price
 l <- length(p)
 t <- seq(1, l, 1)
@@ -352,7 +348,7 @@ ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
   geom_abline(intercept = stat_rho, slope = 0) +
   ylim(c(-1,1))
 
-# Option 2: CME-based harvest price
+# /// Option 2: CME-based harvest price ///
 # (Prices in CME are in USD cents per bushel)
 
 bush_tonne <- 39.368
@@ -394,7 +390,7 @@ for (i in seq_along(meth)) {
   print(cor(yield_dt, price_dt, method = meth[i]))
 }
 # I this case we use the price directly
-stat_rho_real <- cor(yield_dt, p, method = meth[2])
+stat_rho <- cor(yield_dt, p, method = meth[2])
 
 years <- trgt_df$year
 roll <- 10
@@ -403,7 +399,7 @@ for (i in 1:(l-roll)) {
   rho[i] <- (cor(yield_dt[i:(i+roll)],p[i:(i+roll)],method = "kendall"))
 }
 ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho_real, slope = 0) +
+  geom_abline(intercept = stat_rho, slope = 0) +
   ylim(c(-1,1))
 
 # We can notice at least some of the negative correlation
@@ -421,7 +417,7 @@ ggMarginal(fig,
 scatter_hist_2d(yield_dt, p, type = "density")
 
 
-# --- Option 3: Working with the residuals of the ARMA-GARCH ---
+# /// Option 3: With residuals of the ARMA-GARCH ///
 
 dates <- date(res)
 price_res <- data.frame(
@@ -472,7 +468,12 @@ ggMarginal(fig,
 scatter_hist_2d(yield_dt, trgt_res, type = "density")
 
 
-# --- Marginals ---
+# ------------------------------------------------------------------------------
+# --- 5. CROPULAS ---
+# ------------------------------------------------------------------------------
+
+# --- 5.1 Fitting Copulas ---
+
 # We have our marginals for the yield and price
 
 n <- 10000
@@ -485,11 +486,9 @@ sim_y <- rshift_beta(n,
 y <- pshift_beta(sim_y, params["alpha"], params["beta"], a, b)
 
 # Empirical CDF of the price
-emp_cdf_p <- ecdf(end_avp / 100 * bush_tonne)
+emp_cdf_p <- ecdf(end_avp)
 
-# --- Fitting the Copulas ---
-
-# Implicit theta value for a given tau
+# Define copulas to be used
 d <- 2
 noneg_acops <- list(gumbelCopula(dim = d),
                    claytonCopula(dim = d),
@@ -500,26 +499,17 @@ cops <- list(normalCopula(dim = d),
              tCopula(dim = d))
 
 # Choose Copula
-
 i <- 1
 mycop <- cops[[i]]
 
 # Kendall's tau
 nonneg <- list(mycop) %in% noneg_acops
-tau <- ifelse(nonneg, abs(stat_rho_real), stat_rho_real)
+tau <- ifelse(nonneg, abs(stat_rho), stat_rho)
 
-# Corresponding parameter of the Archimedian Cop
+# Corresponding parameter of the Copula
 theta <- iTau(mycop, tau)
-
-# Fix the copula parameter parameter
 attr(mycop, "parameters")[1] <- theta
 mycop
-
-## Only for Archimedian Copulas
-#C2 <- onacopula(mycop, C(theta, 1:2))
-#dim(U2 <- rnacopula(n, C2))
-#cor(U2, method="kendall")
-#splom2(sign(stat_rho) * U2)
 
 # Simulating the Copula
 simcop <- rCopula(n, mycop)
@@ -529,18 +519,17 @@ v <- simcop[,2]
 # If Tau < 0, for noneg_acops we flip around the x axis (u)
 if(nonneg) u = 1 - u
 
-# Simulated values of the Yield
+# Simulated Yields
 Y <- qshift_beta(u, params["alpha"], params["beta"], a, b)
 
-# Simulated values of the residuals of the lr of the Price
-X <- qt(v,  nu)
-# quantiles of the prices
+# Simulated Prices
 X <- quantile(emp_cdf_p, v)
 
 scatter_hist_2d(u, v, type = "density")
 scatter_hist_2d(Y, X, type = "hexbin")
 
-# --- Fitting and Goodness-of-Fit ---
+
+# --- 5.2 Fitting Criteria and Goodness-of-Fit ---
 
 # The gof test is suuper slow so we decrease n
 simcop <- rCopula(1000, mycop)
@@ -560,5 +549,41 @@ N <- 100
 gof <- gofCopula(mycop, empcop, N = N, method = "Sn", estim.method = "ml")
 gof
 gofCopula(mycop, empcop, N = N, method = "SnB")
+
+
+# ------------------------------------------------------------------------------
+# --- 6. Pricing ---
+# ------------------------------------------------------------------------------
+
+# Note: make sure the settle_price is in the correct order
+t0 <- length(settle_price)
+coverage_level <- 0.85
+years <- 5
+Y0 <- mean(tail(yield_dt, years)) * coverage_level
+X0 <- mean(settle_price[1:(1+30)])
+
+guaranteed_revenue <- Y0 * X0
+sim_revenue <- Y * X
+
+summary(sim_revenue)
+plot(ecdf(sim_revenue))
+mean(Y)
+mean(X)
+
+# Prob of being below GR
+mean(sim_revenue < guaranteed_revenue)
+
+# Indemnity/Payout
+indem <- pmax(guaranteed_revenue - sim_revenue, 0)
+hist(indem)
+# Fair Value / Risk Premium
+mean(indem) / guaranteed_revenue
+
+# GR - E[RR | RR < GR]
+less <- which(sim_revenue < guaranteed_revenue)
+av_cond_loss <- guaranteed_revenue - mean(sim_revenue[less])
+prob <- mean(sim_revenue < guaranteed_revenue)
+# Optimal Premium
+(PR <- prob  * av_cond_loss / guaranteed_revenue)
 
 
