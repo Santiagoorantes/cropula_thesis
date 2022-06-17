@@ -35,7 +35,9 @@ packages <- c(
   
   # Copulas
   "copula",
-  "VineCopula"
+  "VineCopula",
+  "gofCopula",
+  "parallel"
 
 )
 

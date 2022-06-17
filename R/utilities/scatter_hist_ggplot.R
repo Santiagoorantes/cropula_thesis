@@ -59,10 +59,15 @@ scatter_hist_2d <- function(x, y, type = "density",
   p <- p +
     my_theme +
     scale_y_continuous(
-      name = "Price (USD/bushel)"
+      name = "Price (USD/bushel)",
+      #limits = c(0, 1800),
+      #labels = as.character(seq(0, 1800, 200)),
+      #breaks = seq(0, 1800, 200)
     ) +
     scale_x_continuous(
-      name = "Yield (Tonnes/Ha)"
+      name = "Yield (Tonnes/Ha)",
+      #labels = as.character(seq(floor(min(x)), ceiling(max(x)), 2)),
+      #breaks = seq(floor(min(x)), ceiling(max(x)), 2)
     )
   
   # Marginal Histograms

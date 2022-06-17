@@ -8,9 +8,9 @@
 
 light_col <- c("#F76E11", "#A6B1E1", "#D9CE3F", "#219F94")
 dark_col <- c("#00818A", "#610094", "#ED6363")
-letter_size <- 3
+letter_size <- 4
 letter_stroke <- 5
-text_size <- 5
+text_size <- 6
 
 my_theme <- {
   theme_fivethirtyeight() +
@@ -22,6 +22,26 @@ my_theme <- {
       plot.background = element_blank()
     )
 }
+
+my_theme <- list(theme_fivethirtyeight() +
+                   theme(
+                     axis.title = element_text(),
+                     plot.title = element_text(size = 30),
+                     plot.subtitle = element_text(size = 25),
+                     axis.title.x = element_text(size = 25),
+                     axis.title.y = element_text(size = 25),
+                     axis.text.x = element_text(size = 20, angle = 90),
+                     axis.text.y = element_text(size = 20),
+                     panel.grid.minor = element_blank(),
+                     legend.background = element_blank(),
+                     legend.box.background = element_blank(),
+                     panel.background = element_blank(),
+                     plot.background = element_blank(),
+                     legend.position = "bottom",
+                     legend.title = element_text(size = 25),
+                     legend.text = element_text(size = 25)
+                   )
+)
 
 #-------------------------------------------------------------------------------
 

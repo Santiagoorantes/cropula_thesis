@@ -3,13 +3,7 @@
 # ------------------------------------------------------------------------------
 
 #' Filter dataframe based on a given filter list
-#'
-#' @param df dataframe object
-#' @param my_filter list of columns and values to filter
-#'
-#' @return Filtered dataframe
-#' @export
-#'
+
 filter_df <- function(df, my_filter) {
 
   # check if filter cols are in df and only keep those
@@ -25,4 +19,18 @@ filter_df <- function(df, my_filter) {
   }
 
   return(df)
+  
 }
+
+
+group_agr_df <- function(df, my_group) {
+  
+  df <- df %>%
+    group_by(!!!syms(my_group)) %>%
+    dplyr::summarise(
+      av_yield = sum(volume) / sum(sowed),
+      av_price = sum(production_value) / sum(volume)
+    )
+  
+}
+

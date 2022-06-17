@@ -1,66 +1,21 @@
-# ------------------------------------------------------------------------------
-# --- 0. Loading packages, functions and data ---
-# ------------------------------------------------------------------------------
 
-# --- Load required packages ---
+# --------------------------- 0. Loading ---------------------------------------
+
+# --- 0.1 Load required packages ---
 source("global.R")
 
-# --- Load raw data ---
+# --- 0.2 Load data ---
 source("data.R")
 
-# --- Load Utilities ---
-folders <- c("utilities")
+# --- 0.3 Load Utilities and Modules ---
+folders <- c("utilities", "modules")
 file_sources <- list.files(folders, pattern = "\\.R$", full.names = TRUE)
 sapply(file_sources, source, .GlobalEnv)
 
 
-# ------------------------------------------------------------------------------
-# --- 1. Data preparation ---
-# ------------------------------------------------------------------------------
+# ------------------------- 1. Yield Distribution ------------------------------
 
-# Corn continuous futures
-corn_ts$Date <- as.Date(corn_ts$Date, "%Y-%m-%d")
-
-# Timeframe of interest
-ini_date <- as.Date("2003-01-01")
-end_date <- as.Date("2020-12-31")
-
-corn_ts <- dplyr::filter(corn_ts, Date >= ini_date, Date <= end_date)
-
-
-## Change column_names of SIAP db (agr_df) to their English equivalent.
-colnames(agr_df) <- c(
-  "year",
-  "id_state",
-  "state",
-  "id_district",  
-  "district", # DDR (rural-development-district)
-  "id_cader",
-  "cader", # Further split of the DDR
-  "id_municipality",
-  "municipality",
-  "id_cycle",
-  "cycle",
-  "id_type",
-  "type",
-  "id_unit",
-  "unit",
-  "id_crop",
-  "crop",
-  "sowed",
-  "harvested",
-  "damaged",
-  "volume",
-  "yield",
-  "price",
-  "production_value"
-)
-
-# ------------------------------------------------------------------------------
-# --- 2. Fit empirical and parametric marginals for the Yield ---
-# ------------------------------------------------------------------------------
-
-# --- 2.0 Applying filters ---
+# --- 1.0 Applying filters ---
 
 # Define filter
 my_filter <-  list(
@@ -71,22 +26,13 @@ my_filter <-  list(
   municipality = c("Guasave")
 )
 
-# Filter target crop data 
+# Yield per year given filter and group_by
 filtered_df <- filter_df(agr_df, my_filter)
 
-# Check if there are further distric divisions
-districts <- unique(filtered_df$district)
-
 group_vars <- c("year", names(my_filter))
-# DF of Yield and Price per year given filtered df
-trgt_df <- filtered_df %>%
-  group_by(!!!syms(group_vars)) %>%
-  summarise(
-    av_yield = sum(volume) / sum(sowed),
-    av_price = sum(production_value) / sum(volume)
-  )
+trgt_df <- group_agr_df(filtered_df, group_vars)
 
-# --- 2.1 Detrending the series ---
+# --- 1.1 Detrending the series ---
 
 # NOTE: make sure that there is only ONE value per year to detrend the series
 nrow(trgt_df) == length(unique(trgt_df$year))
@@ -99,12 +45,24 @@ t <- seq(1, l, 1)
 # anything of higher order was not significant.
 
 # y_t = alpha + beta*T + e_t
-model <- glm(yield ~ t)
-summary(model)
-acf(model$residuals)
+yield_model <- glm(yield ~ t)
+summary(yield_model)
+acf(yield_model$residuals)
+
+coefficients(summary(yield_model)) %>%
+  kbl(caption = "<span style='font-size:600%'><center>Table 1:Linear Model for the Yield</center></span>",
+      booktabs = T, linesep = "", align = "c") %>%
+  kable_styling(latex_options = c("striped", "hold_position"),
+                font_size = 75) %>%
+  kable_paper(full_width = T) %>%
+  row_spec(0, bold = T, color = spec_color(1))
+
+#save_kable(table1, file = "Table_1_lmyield.html")
+#webshot("Table_1_lmyield.html", "Table_1_lmyield.pdf")
+
 
 # y_bar_t = y_hat_2020 * (1 + e_hat_t / y_hat_t )
-yield_dt <- model$fitted.values[l] * (1 + model$residuals / model$fitted.values)
+yield_dt <- yield_model$fitted.values[l] * (1 + yield_model$residuals / yield_model$fitted.values)
 
 # Using Ljung-Box test to check for check for temporal dependency
 # H0: The residuals are independently distributed.
@@ -118,11 +76,38 @@ Box.test(yield_dt, lag = 1, type = "Ljung")
 Box.test(yield^2, lag = 1, type = "Ljung")
 Box.test(yield_dt^2, lag = 1, type = "Ljung")
 
+# Yield Plot
+years <- trgt_df$year
+y_df <- data.frame(years, yield, yield_dt)
+df_melted <- reshape2::melt(y_df, id = "years")
+y <- df_melted$value
+y_color <- "#bc5090"
+y_plot <- ggplot(df_melted) +
+  geom_line(aes(x = years, y = value, linetype = variable),
+            colour = y_color,
+            size = 1.2) +
+  labs(title = "Corn Yield Series in Ahome",
+       subtitle = "Original vs Detrended Series",
+       x = "Year",
+       y = "Yield (Ton/Ha)") +
+  scale_x_continuous(labels = as.character(years), breaks = years) +
+  scale_y_continuous(limits = c(floor(min(y)),ceiling(max(y))),
+                     breaks = c(seq(floor(min(y)), ceiling(max(y)), 1))) +
+  my_theme
+y_plot
 
-# --- 2.2 Fitting distributions to the YIELD ---
+
+# --- 1.2 Fitting distributions to the YIELD ---
 
 # Pearson (based on Cullen and Frey) plots
 pearson_plot(yield_dt, boot = 1000, method = "sample", alpha = 0.7)
+# ggsave("pearson_plot.pdf",
+#        bg = "transparent",
+#        height = 20,
+#        width = 30,
+#        units = "cm",
+#        device = cairo_pdf)
+
 
 # Normal distribution
 fit_norm <- fitdist(yield_dt, distr = "norm", method = "mle")
@@ -140,19 +125,28 @@ a <- 0
 # Sensitivity wrt eps
 eps <- 0.3
 b <- ceiling(max(yield_dt) + eps * sd(yield_dt))
+b <- ceiling(max(yield_dt))
 
 fit_BetaShift <- fitdist(yield_dt, distr = "shift_beta",
                        start = list(alpha = 10, beta = 1),
                        fix.arg = list(a = a, b = b),
                        method = c("mle"))
 
+fit_Beta_KS <- fitdist(yield_dt, distr = "shift_beta",
+                       start = list(alpha = 10, beta = 1),
+                       fix.arg = list(a = a, b = b),
+                       method = "mge", gof = "KS")
+
+fit_Beta_AD <- fitdist(yield_dt, distr = "shift_beta",
+                       start = list(alpha = 10, beta = 1),
+                       fix.arg = list(a = a, b = b),
+                       method = "mge", gof = "AD")
+
 # --- 2.3 Comparing fitted distributions ---
 
 # Goodness of fit statistics and criteria
 fitted_dists <- list(fit_norm, fit_Gam, fit_Wei, fit_BetaShift)
 gof <- gofstat(fitted_dists)
-qqcomp(fitted_dists)
-cdfcomp(fitted_dists)
 
 # DataFrame of Goodness-of-fit
 (gof_df <- data.frame("KS" = gof$ks,
@@ -160,6 +154,29 @@ cdfcomp(fitted_dists)
                      "AD" = gof$ad,
                      "AIC" = gof$aic,
                      "BIC" = gof$bic))
+
+table2 <- gof_df %>%
+  kbl(caption = "<span style='font-size:600%'><center>Table 2:Selection criteria for fitted distributions</center></span>",
+      booktabs = T, linesep = "", align = "c") %>%
+  kable_styling(latex_options = c("striped", "hold_position"),
+                font_size = 75) %>%
+  kable_paper(full_width = T) %>%
+  row_spec(0, bold = T, color = spec_color(1)) %>%
+  row_spec(nrow(gof_df), bold = T) %>%
+  column_spec(1, bold = T, color = spec_color(1)) %>%
+  column_spec(2, color = "white",
+              background = spec_color(c(unlist(gof_df[,1])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(3, color = "white",
+              background = spec_color(c(unlist(gof_df[,2])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(4, color = "white",
+              background = spec_color(c(unlist(gof_df[,3])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(5, color = "white",
+              background = spec_color(c(unlist(gof_df[,4])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(6, color = "white",
+              background = spec_color(c(unlist(gof_df[,5])), option = "D", end = 0.8, direction = -1))
+
+#save_kable(table2, file = "Table_2.html")
+#webshot("Table_2.html", "Table_2.pdf")
 
 full_names <- c("Kolmogorov-Smirnov statistic", "Cramer-von Mises statistic",
                   "Anderson-Darling statistic", "Akaike's Information Criterion",
@@ -169,7 +186,7 @@ probs <- seq(0, 0.9999, length.out = 1000)
 yield_Norm <- qnorm(probs, fit_norm$estimate[1], fit_norm$estimate[2])
 yield_Gamma <- qgamma(probs, fit_Gam$estimate[1], fit_Gam$estimate[2])
 yield_Weibull <- qweibull(probs, fit_Wei$estimate[1], fit_Wei$estimate[2])
-yield_BetaShift <- qshift_beta(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
+yield_Beta <- qshift_beta(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
                                a = a, b = b)
 
 sim_Norm <- rnorm(10000, mean=fit_norm$estimate[1], sd=fit_norm$estimate[2])
@@ -178,7 +195,7 @@ sim_Weibull <- rweibull(10000, shape=fit_Wei$estimate[1], scale=fit_Wei$estimate
 sim_BetaShift <- rshift_beta(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
                              a = a, b = b)
 
-fit_df <- data.frame(yield_Norm, yield_Gamma, yield_Weibull, yield_BetaShift)
+fit_df <- data.frame(yield_Norm, yield_Gamma, yield_Weibull, yield_Beta)
 fit_df <- fit_df %>% reshape2::melt(value.name = "yield_fit")
 
 # Histogram - comparing fitted density plots vs actual data
@@ -195,15 +212,17 @@ p <- ggplot(data.frame(yield_dt), aes(x = yield_dt)) +
                  fill = variable
                ),
                alpha = 0.4) +
-  xlim(0, b + 1)
+  xlim(0, b + 1) +
+  labs(title = "Fitted Distributions",
+       x = "Yield (Ton/Ha)",
+       y = "Density")
 
-  p + my_theme +
-    theme(legend.position = "bottom")
+p + my_theme +
+  theme(legend.position = "bottom")
+  
 
+# --------------------- 2. Price Modelling -------------------------------------
 
-# ------------------------------------------------------------------------------
-# --- 3. Fit ARMA-GARCH model to the Price Series ---
-# ------------------------------------------------------------------------------
 
 my_colors <- c(my_brick="#CC704B", my_lgreen="#9FC088", my_lbrown="#E8C07D",
                my_lblue="#8FBDD3", my_cyan="#5AA897", my_lred="#DD4A48")
@@ -213,6 +232,7 @@ corn_ts <- corn_ts %>% dplyr::select(-c(Date))
 settle_price <- corn_ts$Settle
 lr <- diff(log(settle_price))[-1]
 l <- length(lr)
+
 
 # --- 3.1 Model fit using the "rugarch" package ---
 
@@ -233,8 +253,49 @@ model_fit <- ugarchfit(spec = model, data = lr_df, solver = "solnp")
 model_fit
 # empirical density
 plot(model_fit, which=8)
-# t-student QQ-plot
+
+#par(bg = "transparent")
+plot.garchfit.8(model_fit, size = 2)
+
+# QQ-Plot
 plot(model_fit, which=9)
+plot.garchfit.9(model_fit, size = 2)
+
+# VaR Limits
+cl <- 0.95
+alpha <- (1-cl)/2
+nu <- coef(model_fit)["shape"]
+t <- qt(alpha, nu, lower.tail = F)
+u <- rev(model_fit@fit$sigma)
+m <- 0
+
+df_plt <- data.frame("log-returns" = lr_df$lr,
+                     "VaR_0.975" = m + t * u,
+                     "VaR_0.025" = m - t * u,
+                     "Date" = as.Date(row.names(lr_df)))
+
+df_melted <- reshape2::melt(df_plt, id = "Date")
+
+l_size = 1.1
+plt <- ggplot(df_melted) +
+  geom_line(aes(x = Date, y = value, colour = variable, linetype = variable, size = variable)) +
+  scale_color_manual(name = "", values = c("darkgrey", 3, 2)) +
+  scale_linetype_manual(values = c("solid", "dashed", "dashed")) +
+  scale_size_manual(values = c(l_size, l_size, l_size)) +
+  labs(colour = "", linetype = "") +
+  guides(size= "none", linetype = guide_legend(override.aes=list(colour=c("darkgrey", 3, 2),
+                                                                 size = c(l_size,l_size,l_size)),
+                                                                 linetype = c("solid", "dashed", "dashed"))) +
+  scale_x_date(breaks=date_breaks("1 year"),
+               labels=date_format("%Y")) +
+  labs(title = paste0("Log-returns with VaR limits"),
+       subtitle = paste0(cl*100, "% Confidence level"),
+       x = "Date",
+       y = "log-returns")
+
+plt + my_theme +
+  theme(legend.position = "bottom")
+
 # estimated coefficients
 coef(model_fit)
 
@@ -246,16 +307,16 @@ sim_t <- rt(10000, nu)
 
 plot(model_fit, which="all")
 
-# --- Actual residuals ---
+# Actual residuals
 res <- residuals(model_fit)
 
-# ------------------------------------------------------------------------------
+
 # --- 3.2 Simulating Paths ---
 
 # Simulation
 days <- 180
 nsim <- 10000
-#set.seed(123)
+set.seed(123)
 model_sim <- ugarchsim(model_fit, n.sim = days,
                        n.start = 1, m.sim = nsim,
                        startMethod = "sample")
@@ -265,41 +326,50 @@ model_sim <- ugarchsim(model_fit, n.sim = days,
 # Simulated log-returns
 lr_sim <- model_sim@simulation$seriesSim
 # Last Price of the dataset
-p_0 <- corn_ts$Settle[1]
+(p_0 <- corn_ts$Settle[1])
 exp_lr <- exp(lr_sim)
 x <- rbind(rep(p_0, nsim), exp_lr)
 # Simulated Prices
 p_t <- apply(x, 2, cumprod)
 
+summary(p_t[days,])
+
 # Plotting the paths
-alpha <- 0.05
+alpha <- 0.01
 uq <- 1 - alpha/2
 lq <- 1 - uq
 uq_t <- apply(p_t, 1, function(x) quantile(x, uq))
 lq_t <- apply(p_t, 1, function(x) quantile(x, lq))
-matplot(x = seq(0, days, length.out = nrow(p_t)), y = p_t,
-        type = "l", lty = 1, col = 4:5,
-        main = "Simulated paths ARMA(1,1)-GARCH(1,1)",
-        xlab = "t", ylab = "Price (USD)")
-lines(x = seq(0, days, length.out = nrow(p_t)), y = uq_t,
-      lty = 3, lwd = 3, col = "red")
-lines(x = seq(0, days, length.out = nrow(p_t)), y = lq_t,
-      lty = 3, lwd = 3, col = "red")
-legend("topleft",legend = c(paste0("quant_", uq), paste0("quant_", lq)),
-       cex = 1, col=c("red", "red"), lty = c(3,3), lwd = c(3,3))
 
-summary(p_t[days,])
+# par(bg = "transparent")
+# matplot(x = seq(0, days, length.out = nrow(p_t)), y = p_t,
+#         type = "l", lty = 1, lwd = 1.5, col = 4:5,
+#         main = "Simulated paths ARMA(1,1)-GARCH(1,1)",
+#         xlab = "", ylab = "", xaxt = "n",
+#         cex.main = 2, cex.axis = 1.5)
+# lines(x = seq(0, days, length.out = nrow(p_t)), y = uq_t,
+#       lty = 2, lwd = 4, col = "red")
+# lines(x = seq(0, days, length.out = nrow(p_t)), y = lq_t,
+#       lty = 2, lwd = 4, col = "red")
+# legend("topleft",legend = c(paste0("quant_", uq), paste0("quant_", lq)),
+#        cex = 1.5, col=c("red", "red"), lty = c(3,3), lwd = c(4,4))
+# mtext("Days", 1, line = 3, cex = 1.8)
+# mtext("Price (usd_cent/bushel)", 2, line = 2.5, cex = 1.8)
+# axis(1, seq(0, days, 20), cex.axis = 1.5)
+
 
 end_p <- p_t[days,]
 end_avp <- apply(p_t[(days-30):days,], 2, mean)
 plot_df <- data.frame("Final_Price" = end_p,
                       "Final_1m_avPrice" = end_avp) 
+
 melt_df <- reshape2::melt(plot_df)
 ggplot(melt_df) +
   geom_histogram(aes(y = ..density.., x = value, fill = variable),
                  position = "dodge", bins = 30) +
-  labs(title = "Final vs Last Month Average (Price)") + 
-  xlab("Price (USD)")
+  labs(title = "End-Price vs Last Month Average Price") + 
+  xlab("Price (usd_cent/bushel)") +
+  my_theme
 
 
 # Empirical Distribution of the simulated prices
@@ -311,44 +381,11 @@ quantile(emp_cdf, 0.99)
 price_quantiles <- emp_cdf(end_avp)
 
 
-# ------------------------------------------------------------------------------
-# --- 4. Rank Correlation ---
-# ------------------------------------------------------------------------------
+# ----------------------- 3. Rank Correlation ----------------------------------
 
-# --- 4.1 Empirical Correlations ---
+# --- 3.1 Empirical Correlations ---
 
-# /// Option 1: SIAP Price (detrended) ///
-p <- trgt_df$av_price
-l <- length(p)
-t <- seq(1, l, 1)
-
-model <- lm(p ~ t)
-price_dt <- model$fitted.values[l] * (1 + model$residuals / model$fitted.values)
-
-
-# Correlation
-meth <- c("pearson", "kendall", "spearman")
-# Biased series
-for (i in seq_along(meth)) {
-  print(cor(yield_dt, p, method = meth[i]))
-}
-# Detrended/unbiased series
-for (i in seq_along(meth)) {
-  print(cor(yield_dt, price_dt, method = meth[i]))
-}
-stat_rho <- cor(yield_dt, price_dt, method = meth[2])
-
-years <- trgt_df$year
-roll <- 10
-rho <- numeric()
-for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],price_dt[i:(i+roll)],method = meth[2]))
-}
-ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0) +
-  ylim(c(-1,1))
-
-# /// Option 2: CME-based harvest price ///
+# // Option 1: CME-based harvest price //
 # (Prices in CME are in USD cents per bushel)
 
 bush_tonne <- 39.368
@@ -368,222 +405,371 @@ harvest_price <- harvest_price %>%
   mutate(USD_tonne = av_price/100 * bush_tonne)
 
 p <- harvest_price$USD_tonne
-plot(p, type="l")
 
 # Correlation of original vs detrended CME price series
 l <- length(p)
 t <- seq(1, l, 1)
 
-model <- lm(p~t)
+t2 <- t^2
+model <- lm(p ~ t + t2)
+model <- lm(p ~ t)
 # In this case, t is not significant so we can use the price directly
 summary(model)
 price_dt <- model$fitted.values[l] * (1 + model$residuals / model$fitted.values)
+plot(p, type="l")
+lines(price_dt, lty = 2)
 
 # Correlation
 meth <- c("pearson", "kendall", "spearman")
-# Biased series
-for (i in seq_along(meth)) {
-  print(cor(yield_dt, p, method = meth[i]))
-}
-# Detrended/unbiased series
-for (i in seq_along(meth)) {
-  print(cor(yield_dt, price_dt, method = meth[i]))
-}
-# I this case we use the price directly
-stat_rho <- cor(yield_dt, p, method = meth[2])
 
+# *** Series to use for the RANK CORRELATION ***
+price_ts <- p
+
+# I this case we use the price directly
+stat_rho <- unlist(lapply(meth, function(m) cor(yield_dt, price_ts, method = m)))
+names(stat_rho) <- meth
+stat_rho
+
+# Data Frame with Historic and Rolling correlations
 years <- trgt_df$year
 roll <- 10
-rho <- numeric()
-for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],p[i:(i+roll)],method = "kendall"))
+
+df_rho <- as.data.frame(t(stat_rho))
+df_rows <- matrix(rep(as.vector(stat_rho), l-roll), ncol = 3, byrow = TRUE)
+colnames(df_rows) <- meth
+df_rho <- rbind(df_rho, df_rows)
+
+for (i in 1:(l-roll+1)) {
+  rho <- unlist(lapply(meth, function(m) cor(yield_dt[i:(roll+i-1)],price_ts[i:(roll+i-1)], method = m)))
+  df_rho <- rbind(df_rho, rho)
 }
-ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0) +
-  ylim(c(-1,1))
 
-# We can notice at least some of the negative correlation
-fig <- ggplot() + 
-  geom_point(aes(x = yield_dt, y = p), 
-             colour = "steelblue",
-             size = 2)
-ggMarginal(fig,
-           type = "histogram",
-           size = 3,
-           fill = "steelblue",
-           xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 6))
+type <- c(rep("Historic", l-roll+1), rep("Rolling", l-roll+1))
+df_rho <- cbind(df_rho, type)
+Year <- rep(years[(l-roll+2):l], 2)
+df_rho <- cbind(df_rho, Year)
 
-scatter_hist_2d(yield_dt, p, type = "density")
+df_plt <- reshape2::melt(df_rho, id = c("type", "Year"))
+inf <- -1
+sup <- max(df_plt$value, 0)
 
-
-# /// Option 3: With residuals of the ARMA-GARCH ///
-
-dates <- date(res)
-price_res <- data.frame(
-  "year" = year(dates),
-  "month" = month(dates),
-  "day" = day(dates),
-  "residual" = res
-)
-
-# May and June are the months where almost all of the harvest happens
-harvest_months <- c(5,6)
-price_res <- price_res %>%
-  group_by(year) %>%
-  filter(month %in% harvest_months) %>%
-  summarise(av_res = mean(residual))
-
-trgt_res <- price_res$av_res
-plot(trgt_res, type="l")
-
-# Rank Correlation with the detrended yields
-for (i in seq_along(meth)) {
-  print(cor(yield_dt, trgt_res, method = meth[i]))
-}
-stat_rho <- cor(yield_dt, trgt_res, method = meth[2])
-
-years <- price_res$year
-roll <- 10
-rho <- numeric()
-for (i in 1:(l-roll)) {
-  rho[i] <- (cor(yield_dt[i:(i+roll)],trgt_res[i:(i+roll)],method = meth[2]))
-}
-ggplot() + geom_line(aes(x = years[(roll+1):l], y=rho)) +
-  geom_abline(intercept = stat_rho, slope = 0) +
-  ylim(c(-1,1))
-
-# We can notice at least some of the negative correlation
-fig <- ggplot() + 
-  geom_point(aes(x = yield_dt, y = trgt_res), 
-             colour = "steelblue",
-             size = 2)
-ggMarginal(fig,
-           type = "histogram",
-           size = 3,
-           fill = "steelblue",
-           xparams = list(binwidth = 0.5),
-           yparams = list(binwidth = 0.0005))
-
-scatter_hist_2d(yield_dt, trgt_res, type = "density")
+ggplot(df_plt, aes(x = Year, y = value,
+                   colour = variable, linetype = type)) +
+  geom_line(size = 1.2) +
+  facet_grid(variable ~ .) +
+  scale_linetype_manual(values = c("dashed", "solid")) +
+  scale_x_continuous(labels = as.character(years[roll:l]), breaks = years[roll:l]) +
+  scale_y_continuous(limits = c(inf, sup),
+                     labels = as.character(c(round(seq(inf, sup, 0.2),1))),
+                     breaks = c(seq(inf, sup, 0.2))) +
+  labs(title = "Correlation comparison",
+       subtitle = paste0(roll, "-year rolling correlation"),
+       x = "Year",
+       y = "Corr") +
+  my_theme +
+  theme(strip.text.y = element_text(size = 25)) +
+  guides(colour = "none",
+         linetype = guide_legend(override.aes=list(colour=c("black", "black"),
+                                                   size = c(0.8,1)),
+                                 linetype = c("solid", "dashed")))
 
 
-# ------------------------------------------------------------------------------
-# --- 5. CROPULAS ---
-# ------------------------------------------------------------------------------
 
-# --- 5.1 Fitting Copulas ---
+# // OPTION 2 //
+# --- Working with the residuals of the ARMA-GARCH ---
+# 
+# dates <- date(res)
+# price_res <- data.frame(
+#   "year" = year(dates),
+#   "month" = month(dates),
+#   "day" = day(dates),
+#   "residual" = res
+# )
+# 
+# # May and June are the months where almost all of the harvest happens
+# harvest_months <- c(5,6)
+# price_res <- price_res %>%
+#   group_by(year) %>%
+#   filter(month %in% harvest_months) %>%
+#   summarise(av_res = mean(residual))
+# 
+# trgt_res <- price_res$av_res
+# plot(trgt_res, type="l")
+# 
+# 
+# price_ts <- trgt_res
+# 
+# # I this case we use the price directly
+# stat_rho <- unlist(lapply(meth, function(m) cor(yield_dt, price_ts, method = m)))
+# names(stat_rho) <- meth
+# stat_rho
+# 
+# # Data Frame with Historic and Rolling correlations
+# years <- trgt_df$year
+# roll <- 10
+# 
+# df_rho <- as.data.frame(t(stat_rho))
+# df_rows <- matrix(rep(as.vector(stat_rho), l-roll), ncol = 3, byrow = TRUE)
+# colnames(df_rows) <- meth
+# df_rho <- rbind(df_rho, df_rows)
+# 
+# for (i in 1:(l-roll+1)) {
+#   rho <- unlist(lapply(meth, function(m) cor(yield_dt[i:(roll+i-1)],price_ts[i:(roll+i-1)], method = m)))
+#   df_rho <- rbind(df_rho, rho)
+# }
+# 
+# type <- c(rep("Historic", l-roll+1), rep("Rolling", l-roll+1))
+# df_rho <- cbind(df_rho, type)
+# Year <- rep(years[(l-roll+2):l], 2)
+# df_rho <- cbind(df_rho, Year)
+# 
+# df_plt <- reshape2::melt(df_rho, id = c("type", "Year"))
+# inf <- -1
+# sup <- max(df_plt$value, 0)
+# 
+# ggplot(df_plt, aes(x = Year, y = value,
+#                    colour = variable, linetype = type)) +
+#   geom_line(size = 1.2) +
+#   facet_grid(variable ~ .) +
+#   scale_linetype_manual(values = c("dashed", "solid")) +
+#   scale_x_continuous(labels = as.character(years[roll:l]), breaks = years[roll:l]) +
+#   scale_y_continuous(limits = c(inf, sup),
+#                      labels = as.character(c(round(seq(inf, sup, 0.2),1))),
+#                      breaks = c(seq(inf, sup, 0.2))) +
+#   labs(title = "Correlation comparison",
+#        subtitle = paste0(roll, "-year rolling correlation"),
+#        x = "Year",
+#        y = "Corr") +
+#   my_theme +
+#   theme(strip.text.y = element_text(size = 25)) +
+#   guides(colour = "none",
+#          linetype = guide_legend(override.aes=list(colour=c("black", "black"),
+#                                                   size = c(1,1)),
+#                                                   linetype = c("solid", "dashed")))
 
-# We have our marginals for the yield and price
 
-n <- 10000
-# Shifted Beta dist
-params <- coef(fit_BetaShift)
-sim_y <- rshift_beta(n,
-                     alpha = params["alpha"], beta = params["beta"],
-                     a = a, b = b)
-# CDF 
-y <- pshift_beta(sim_y, params["alpha"], params["beta"], a, b)
+# --------------------------- 4. CROPULAS --------------------------------------
+
+# --- 4.1 Fit and Simulate Copulas ---
 
 # Empirical CDF of the price
 emp_cdf_p <- ecdf(end_avp)
 
-# Define copulas to be used
-d <- 2
-noneg_acops <- list(gumbelCopula(dim = d),
-                   claytonCopula(dim = d),
-                   joeCopula(dim = d))
-acops <- list(amhCopula(dim = d),
-             frankCopula(dim = d))
-cops <- list(normalCopula(dim = d),
-             tCopula(dim = d))
-
-# Choose Copula
-i <- 1
-mycop <- cops[[i]]
-
-# Kendall's tau
-nonneg <- list(mycop) %in% noneg_acops
-tau <- ifelse(nonneg, abs(stat_rho), stat_rho)
-
-# Corresponding parameter of the Copula
-theta <- iTau(mycop, tau)
-attr(mycop, "parameters")[1] <- theta
-mycop
-
-# Simulating the Copula
-simcop <- rCopula(n, mycop)
-u <- simcop[,1]
-v <- simcop[,2]
-
-# If Tau < 0, for noneg_acops we flip around the x axis (u)
-if(nonneg) u = 1 - u
-
-# Simulated Yields
-Y <- qshift_beta(u, params["alpha"], params["beta"], a, b)
-
-# Simulated Prices
-X <- quantile(emp_cdf_p, v)
-
-scatter_hist_2d(u, v, type = "density")
-scatter_hist_2d(Y, X, type = "hexbin")
+# Lists of Copulas
+cops <- list(
+  
+  # - Explicit Copulas -
+  
+  normalCopula(),
+  tCopula(),
+  
+  # - Archimedean Copulas -
+  
+  # other
+  amhCopula(),
+  frankCopula(),
+  plackettCopula(),
+  
+  # nonnegative
+  gumbelCopula(),
+  claytonCopula(),
+  joeCopula()
+  
+)
 
 
-# --- 5.2 Fitting Criteria and Goodness-of-Fit ---
+# --- 4.2 Fitting Criteria and Goodness-of-Fit ---
 
-# The gof test is suuper slow so we decrease n
-simcop <- rCopula(1000, mycop)
-empcop <- matrix(cbind(yield_dt, p), ncol = 2)
+# Empical Copula
+empcop <- matrix(cbind(yield_dt, price_ts), ncol = 2)
 obs  <- pobs(empcop)
-fit_mpl <- fitCopula(mycop, obs, method = "mpl")
-fit_ml <- fitCopula(mycop, obs, method = "ml", traceOpt=TRUE)
-summary(fit_mpl)
-summary(fit_ml)
 
-AIC(fit_mpl)
-AIC(fit_ml)
-BIC(fit_mpl)
-BIC(fit_ml)
+# Performs chosen tests for chosen copulas
+# Using 6 cores: takes approx 390 seconds to run M = 1000, MJ = 1000.
+# (~ 6.5 min)
+# Using 12 cores: takes approx 470 seconds to run M = 1000, MJ = 1000.
+# (~8 min)
+library("gofCopula")
+library(parallel)
 
-N <- 100
-gof <- gofCopula(mycop, empcop, N = N, method = "Sn", estim.method = "ml")
-gof
-gofCopula(mycop, empcop, N = N, method = "SnB")
+cores <- parallel::detectCores()
+tests <- c("gofCvM", "gofKendallCvM", "gofKendallKS", "gofKS",
+           #"gofRosenblattSnB", "gofRosenblattSnC",
+           "gofKernel")
+copulae <- c("normal", "t", "amh", "frank", "plackett")
+
+empcop <- matrix(cbind(yield_dt, price_ts), ncol = 2)
+system.time({
+  test_copulas <- gof(empcop, M = 1000, MJ = 1000,
+                       processes = 6,
+                       tests = tests,
+                       copula = copulae,)
+})
+
+unlist(lapply(test_copulas, function(c) c["theta"]))
+
+# Pirate plot
+plot(test_copulas, hybrid = c(1:5))
+
+empcop <- matrix(cbind(yield_dt*(-1), price_ts), ncol = 2)
+nonneg_copulae <- c("gumbel", "clayton", "joe")
+system.time({
+  test_nonegcopulas <- gof(empcop, M = 1000, MJ = 1000,
+                           processes = 6,
+                           tests = tests,
+                           copula = nonneg_copulae)
+})
+
+plot(test_nonegcopulas)
+
+all_cops <- c(test_copulas, test_nonegcopulas)
+unlist(lapply(all_cops, function(c) c["theta"]))
+
+all_cops$normal$res.tests[1:(length(tests)),]
+all_cops$t$res.tests[1:(length(tests)),]
+all_cops$frank$res.tests[1:(length(tests)),]
+all_cops$amh$res.tests[1:(length(tests)),]
+all_cops$plackett$res.tests[1:(length(tests)),]
+all_cops$clayton$res.tests[1:(length(tests)),]
+all_cops$gumbel$res.tests[1:(length(tests)),]
+all_cops$joe$res.tests[1:(length(tests)),]
+
+# Replacing the thetas for the fitted ones
+
+unlist(lapply(cops, function(c) attr(c, "parameters")))
+unlist(lapply(all_cops, function(c) c["theta"]))
+
+for (i in 1:length(cops)) {
+  theta <- unlist(all_cops[[i]]["theta"])
+  attr(cops[[i]], "parameters")[1] <- theta
+}
+
+# Assign degrees of freedom to t-dist
+df <- unlist(all_cops[[2]]["df"])[1]
+attr(cops[[2]], "parameters")[2] <- df 
 
 
-# ------------------------------------------------------------------------------
-# --- 6. Pricing ---
-# ------------------------------------------------------------------------------
+# Dimensions (currently unused)
+d <- 2
+
+# Rank Correlation
+tau <- stat_rho[2]
+# Fit via Kandalls Tau
+# cops <- lapply(cops, function(c) fit_cop(c, tau = tau))
+
+# --- Simulation ---
+n <- 100000
+set.seed(123)
+sim_allcops <- lapply(cops, function(c) simulate_cop(n, c, tau = tau))
+
+names(sim_allcops) <- unlist(lapply(cops, function(c) class(c)[1]))
+copsim_df <- data.frame(sim_allcops)
+
+even_cols <- seq(2, ncol(copsim_df), 2)
+v_df <- copsim_df[, even_cols]
+u_df <- copsim_df[, -c(even_cols)]
+
+params <- coef(fit_BetaShift)
+sim_yields <- apply(u_df, 2, function(u) qshift_beta(u, params["alpha"], params["beta"], a, b))
+sim_prices <- apply(v_df, 2, function(v) quantile(emp_cdf_p, v))
+
+# Plots for the presentation
+scatter_hist_2d(u_df[,1], v_df[,1], type = "density")
+#plt + labs(title = class(mycop)[1],
+#           subtitle = paste0("Kendall's Tau = ", round(stat_rho[2],4)))
+
+scatter_hist_2d(sim_yields[,1], sim_prices[,1], type = "hexbin")
+
+
+# --------------------------- 5. Pricing ---------------------------------------
 
 # Note: make sure the settle_price is in the correct order
 t0 <- length(settle_price)
-coverage_level <- 0.85
+coverage_levels <- list("55%" = 0.55,
+                        "65%" = 0.65,
+                        "75%" = 0.75,
+                        "85%" = 0.85,
+                        "100%" = 1)
 years <- 5
-Y0 <- mean(tail(yield_dt, years)) * coverage_level
-X0 <- mean(settle_price[1:(1+30)])
+y_g <- mean(tail(yield_dt, years))
+# --- Guaranteed Yield (y_g) ---
+Y0 <- vapply(coverage_levels, function(cl) y_g * cl, numeric(1))
 
-guaranteed_revenue <- Y0 * X0
-sim_revenue <- Y * X
+# --- Guaranteed Price (x_g) ---
+corn_ts["Date"] <- as.Date(row.names(corn_ts), "%Y-%m-%d")
+ini_date <- as.Date("2020-12-01")
+end_date <- as.Date("2020-12-31")
+sow_month_prices <- filter(corn_ts, Date >= ini_date, Date <= end_date) %>%
+  .$Settle
+x_g <- mean(sow_month_prices)
 
-summary(sim_revenue)
-plot(ecdf(sim_revenue))
-mean(Y)
-mean(X)
+# --- Optimal Premium ---
+risk_prem <- risk_premium(coverage_levels, y_g, x_g, sim_yields, sim_prices)
 
-# Prob of being below GR
-mean(sim_revenue < guaranteed_revenue)
+# --- Comparision assuming independent yield and price  ---
+sim_rev_indep <- sim_BetaShift * end_avp
 
-# Indemnity/Payout
-indem <- pmax(guaranteed_revenue - sim_revenue, 0)
-hist(indem)
-# Fair Value / Risk Premium
-mean(indem) / guaranteed_revenue
+risk_premium(coverage_levels, y_g, x_g, data.frame(sim_BetaShift), data.frame(end_avp))
 
-# GR - E[RR | RR < GR]
-less <- which(sim_revenue < guaranteed_revenue)
-av_cond_loss <- guaranteed_revenue - mean(sim_revenue[less])
-prob <- mean(sim_revenue < guaranteed_revenue)
-# Optimal Premium
-(PR <- prob  * av_cond_loss / guaranteed_revenue)
+# --- Table with results ---
+
+risk_prem <- round(risk_prem * 100, 3)
+
+prem_list <- split(risk_prem, 1:nrow(risk_prem))
+
+risk_prem_df <- data.frame(risk_prem,
+                           row.names = c("Normal", "t",
+                                         "AMH", "Frank", "Placket",
+                                         "Gumbel", "Clayton", "Joe"))
+colnames(risk_prem_df) <- paste0(" ", names(coverage_levels), " ")
+
+risk_prem_df %>%
+  kbl(caption = "<span style='font-size:400%'><center>Table 5:Risk Premium for fitted Copula Models</center></span>",
+      booktabs = T, linesep = "", align = "c") %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 55) %>%
+  add_header_above(c("", "Premium (%) for Coverage Levels" = 5),
+                   color = spec_color(1, option = "A"), bold = T) %>%
+  kable_paper(full_width = F) %>%
+  column_spec(1, bold = T, color = spec_color(1)) %>%
+  row_spec(0, bold = T, color = spec_color(1)) %>%
+  column_spec(2, color = "white",
+              background = spec_color(c(unlist(risk_prem[,1])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(3, color = "white",
+              background = spec_color(c(unlist(risk_prem[,2])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(4, color = "white",
+              background = spec_color(c(unlist(risk_prem[,3])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(5, color = "white",
+              background = spec_color(c(unlist(risk_prem[,4])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(6, color = "white",
+              background = spec_color(c(unlist(risk_prem[,5])), option = "D", end = 0.8, direction = -1))
+
+# 
+# save_kable(table_5, file = "Guasave_rates_p.html")
+# webshot::webshot("Guasave_rates_p.html", "Guasave_rates_p.pdf")
+
+
+# Standard Deviation
+(sd_indem <- apply(indem, 2, sd))
+(sd_PR <- sd_indem / guaranteed_revenue)
+
+alpha <- 0.01
+ret_period <- 1 / alpha
+f <- function(x, cl = 1-alpha) quantile(x, cl)
+VaR <- apply(indem, 2, f) / guaranteed_revenue
+
+# Expenses Adjustment (management, reinsurance, utility)
+expenses <- 0.1 + 0.15 + 0.05
+# Market Rate Estimate (VaR and SD method)
+(rates <- (PR + pmax(VaR - PR, 0) / ret_period)) 
+rates / (1-expenses)
+
+indem_cdf <- apply(indem, 2, ecdf)
+# return period of the eps * sd
+epsilon <- 3
+VaR_equiv <- lapply(1:length(indem_cdf), function(x) indem_cdf[[x]](avg_indem[x] + epsilon * sd_indem[x]))
+ret_period2 <- unlist(lapply(VaR_equiv, function(x) 1 / (1-x)))
+(rates2 <- (PR + epsilon * sd_PR / ret_period2)) 
+rates2 / (1-expenses)
+
 
 
