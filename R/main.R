@@ -12,6 +12,17 @@ folders <- c("utilities", "modules")
 file_sources <- list.files(folders, pattern = "\\.R$", full.names = TRUE)
 sapply(file_sources, source, .GlobalEnv)
 
+# ---------------------------- Constants ---------------------------------------
+
+# simulations
+n <- 100000 
+# Bootstraping loops gofCopula 
+M <- 2000
+MJ <- 1000 # boot for gofKernel
+# Time of cultivation (days)
+days <- 180
+# Bushels in a Tonne
+bush_tonne <- 39.368
 
 # ------------------------- 1. Yield Distribution ------------------------------
 
@@ -310,7 +321,7 @@ coef(model_fit)
 std_res <- residuals(model_fit, standardize=TRUE)
 
 nu <- coef(model_fit)["shape"]
-sim_t <- rt(10000, nu)
+sim_t <- rt(n, nu)
 
 plot(model_fit, which="all")
 
@@ -321,11 +332,9 @@ res <- residuals(model_fit)
 # --- 3.2 Simulating Paths ---
 
 # Simulation
-days <- 180
-nsim <- 100000
 set.seed(123)
 model_sim <- ugarchsim(model_fit, n.sim = days,
-                       n.start = 1, m.sim = nsim,
+                       n.start = 1, m.sim = n,
                        startMethod = "sample")
 #plot(model_sim)
 
@@ -334,7 +343,7 @@ lr_sim <- model_sim@simulation$seriesSim
 # Last Price of the dataset
 (p_0 <- corn_ts$Settle[1])
 exp_lr <- exp(lr_sim)
-x <- rbind(rep(p_0, nsim), exp_lr)
+x <- rbind(rep(p_0, n), exp_lr)
 # Simulated Prices
 p_t <- apply(x, 2, cumprod)
 
@@ -393,8 +402,6 @@ price_quantiles <- emp_cdf(end_avp)
 
 # // Option 1: CME-based harvest price //
 # (Prices in CME are in USD cents per bushel)
-
-bush_tonne <- 39.368
 
 dates <- rownames(corn_ts)
 harvest_price <- data.frame("year" = year(dates),
@@ -601,50 +608,36 @@ cores <- parallel::detectCores()
 tests <- c("gofCvM", "gofKendallCvM", "gofKendallKS", "gofKS",
            "gofRosenblattSnB", "gofRosenblattSnC",
            "gofKernel")
-copulae <- c("normal", "t", "amh", "frank", "plackett")
+copulae <- c("normal", "t", "amh", "frank", "plackett", "gumbel", "clayton", "joe")
+rotation <- c(0, 0, 0, 0, 0, 270, 90, 270)
 
 empcop <- matrix(cbind(yield_dt, price_ts), ncol = 2)
+
 system.time({
-  test_copulas <- gof(empcop, M = 1500, MJ = 1000,
-                       processes = 6,
-                       tests = tests,
-                       copula = copulae,)
+  fitted_copulas <- gof(empcop, M = M, MJ = MJ,
+                      processes = 6,
+                      tests = tests,
+                      copula = copulae,
+                      flip = rotation)
 })
 
-unlist(lapply(test_copulas, function(c) c["theta"]))
+unlist(lapply(fitted_copulas, function(c) c["theta"]))
 
 # Pirate plot
-plot(test_copulas, hybrid = c(1:4))
-
-empcop <- matrix(cbind(yield_dt*(-1), price_ts), ncol = 2)
-nonneg_copulae <- c("gumbel", "clayton", "joe")
-system.time({
-  test_nonegcopulas <- gof(empcop, M = 1500, MJ = 1000,
-                           processes = 6,
-                           tests = tests,
-                           copula = nonneg_copulae)
-})
-
-par(bg = "transparent")
-plot(test_nonegcopulas, hybrid = 1:3)
-
-
-
-all_cops <- c(test_copulas, test_nonegcopulas)
-unlist(lapply(all_cops, function(c) c["theta"]))
+plot(fitted_copulas, hybrid = c(1:4))
 
 statistics <- rbind(
-  t(all_cops$normal$res.tests[1:(length(tests)),]),
-  t(all_cops$t$res.tests[1:(length(tests)),]),
-  t(all_cops$amh$res.tests[1:(length(tests)),]),
-  t(all_cops$frank$res.tests[1:(length(tests)),]),
-  t(all_cops$plackett$res.tests[1:(length(tests)),]),
-  t(all_cops$clayton$res.tests[1:(length(tests)),]),
-  t(all_cops$gumbel$res.tests[1:(length(tests)),]),
-  t(all_cops$joe$res.tests[1:(length(tests)),])
+  t(fitted_copulas$normal$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$t$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$amh$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$frank$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$plackett$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$clayton$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$gumbel$res.tests[1:(length(tests)),]),
+  t(fitted_copulas$joe$res.tests[1:(length(tests)),])
 )
 
-theta <- unlist(lapply(all_cops, function(cop) {
+theta <- unlist(lapply(fitted_copulas, function(cop) {
   c(cop["theta"], ifelse(is.null(unlist(cop["df"])[1]), "", unlist(cop["df"])[1]))
   }))
 
@@ -695,20 +688,19 @@ table_4 <- tbl_df %>%
 
 # save_kable(table_4, file = "gofCopulas.html")
 # webshot::webshot("gofCopulas.html", "gofCopulas.pdf")
-# 
 
 # Replacing the thetas for the fitted ones
 
 unlist(lapply(cops, function(c) attr(c, "parameters")))
-unlist(lapply(all_cops, function(c) c["theta"]))
+unlist(lapply(fitted_copulas, function(c) c["theta"]))
 
 for (i in 1:length(cops)) {
-  theta <- unlist(all_cops[[i]]["theta"])
+  theta <- unlist(fitted_copulas[[i]]["theta"])
   attr(cops[[i]], "parameters")[1] <- theta
 }
 
 # Assign degrees of freedom to t-dist
-df <- unlist(all_cops[[2]]["df"])[1]
+df <- unlist(fitted_copulas[[2]]["df"])[1]
 attr(cops[[2]], "parameters")[2] <- df 
 
 
@@ -720,8 +712,8 @@ tau <- stat_rho[2]
 # Fit via Kandalls Tau
 # cops <- lapply(cops, function(c) fit_cop(c, tau = tau))
 
+
 # --- Simulation ---
-n <- 100000
 set.seed(123)
 sim_allcops <- lapply(cops, function(c) simulate_cop(n, c, tau = tau))
 
@@ -739,7 +731,7 @@ sim_prices <- apply(v_df, 2, function(v) quantile(emp_cdf_p, v))
 # - Plots for the presentation -
 i <- 1
 plt <- scatter_hist_2d(u_df[,i], v_df[,i], type = "density")
-plt + labs(title = cop_names[i],
+plt + labs(title = copulae[i],
            subtitle = paste0("Theta = ", round(as.numeric(theta[2*i-1]),4)))
 
 plt <- scatter_hist_2d(sim_yields[,i], sim_prices[,i], type = "hexbin")
@@ -786,7 +778,7 @@ cop_names <- c("Normal", "t", "AMH", "Frank", "Plackett", "Gumbel", "Clayton", "
 risk_prem_df <- data.frame(risk_prem, row.names = c(cop_names, "Independent"))
 colnames(risk_prem_df) <- paste0(" ", names(coverage_levels), " ")
 
-risk_prem_df %>%
+table_5 <- risk_prem_df %>%
   kbl(caption = "<span style='font-size:400%'><center>Table 5:Risk Premium for fitted Copula Models</center></span>",
       booktabs = T, linesep = "", align = "c") %>%
   kable_styling(latex_options = c("striped", "hold_position"), font_size = 55) %>%
@@ -872,7 +864,6 @@ table_6 <- tbl_6 %>%
 
 # save_kable(table_6, file = "table_6.html")
 # webshot::webshot("table_6.html", "table_6.pdf")
-
 
 
 
