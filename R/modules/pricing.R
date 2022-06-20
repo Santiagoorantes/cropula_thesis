@@ -1,16 +1,11 @@
 
-# Pricing
+# --------------------------- Risk Premium -------------------------------------
 
-# coverage_levels <- list("55%" = 0.55,
-#                         "65%" = 0.65,
-#                         "75%" = 0.75,
-#                         "85%" = 0.85,
-#                         "100%" = 1)
-# 
-# name_copulas <- c("gumbelCopula", "claytonCopula", "joeCopula", 
-#                   "amhCopula", "frankCopula",
-#                   "normalCopula", "tCopula")
-
+coverage_levels <- list("55%" = 0.55,
+                        "65%" = 0.65,
+                        "75%" = 0.75,
+                        "85%" = 0.85,
+                        "100%" = 1)
 
 risk_premium <- function(coverage_levels, y_g, x_g, Y_df, X_df) {
   
@@ -61,6 +56,45 @@ risk_premium <- function(coverage_levels, y_g, x_g, Y_df, X_df) {
   return(PR)
   
 }
+
+
+# ---------------------------- Risk Measures -----------------------------------
+  
+risk_levels <- list(0.95, 0.99, 0.995, 0.999, 0.9995)
+
+risk_measures <- function(y_g, x_g, Y_df, X_df, risk_levels) {
+  
+  guaranteed_revenue <- y_g * x_g
+  sim_rev_df <- Y_df * X_df
+  imdem <- apply(sim_rev_df, 2, function(r) pmax(guaranteed_revenue - r, 0))
+  indem <- pmax(guaranteed_revenue - sim_rev_df, 0)
+  indem_pct <- indem / guaranteed_revenue
+  
+  # Value at Risk
+  VaR <- apply(indem_pct, 2, function(i) {
+    
+      unlist(lapply(risk_levels, function(q) quantile(i, q)))
+    
+    } 
+  )
+  VaR <- as.data.frame(t(VaR))
+  
+  # Expected Shortfall
+  ES <- apply(indem_pct, 2, function(i) {
+    
+      unlist(lapply(risk_levels, function(q) mean(i[i > quantile(i, q)])))
+    
+    }
+  )
+  
+  ES <- as.data.frame(t(ES))
+  colnames(ES) <- colnames(VaR)
+  
+  risk_measures <- list("VaR" = VaR, "ES" = ES)
+  return(risk_measures)
+    
+}
+
 
 
 

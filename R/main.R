@@ -155,14 +155,21 @@ gof <- gofstat(fitted_dists)
                      "AIC" = gof$aic,
                      "BIC" = gof$bic))
 
-table2 <- gof_df %>%
+parameters <- round(unlist(lapply(fitted_dists, coef)), 4)
+param_df <- matrix(parameters, ncol = 2, byrow = TRUE)
+
+tbl_df <- cbind(gof_df, param_df)
+
+table_2 <- tbl_df %>%
   kbl(caption = "<span style='font-size:600%'><center>Table 2:Selection criteria for fitted distributions</center></span>",
       booktabs = T, linesep = "", align = "c") %>%
   kable_styling(latex_options = c("striped", "hold_position"),
                 font_size = 75) %>%
   kable_paper(full_width = T) %>%
+  add_header_above(c("Distribution", "Criteria / GoF Test" = 5, "Parameters" = 2),
+                   color = spec_color(1, option = "A"), bold = T) %>%
   row_spec(0, bold = T, color = spec_color(1)) %>%
-  row_spec(nrow(gof_df), bold = T) %>%
+  row_spec(nrow(gof_df), bold = T, color = "black") %>%
   column_spec(1, bold = T, color = spec_color(1)) %>%
   column_spec(2, color = "white",
               background = spec_color(c(unlist(gof_df[,1])), option = "D", end = 0.8, direction = -1)) %>%
@@ -174,9 +181,9 @@ table2 <- gof_df %>%
               background = spec_color(c(unlist(gof_df[,4])), option = "D", end = 0.8, direction = -1)) %>%
   column_spec(6, color = "white",
               background = spec_color(c(unlist(gof_df[,5])), option = "D", end = 0.8, direction = -1))
-
-#save_kable(table2, file = "Table_2.html")
-#webshot("Table_2.html", "Table_2.pdf")
+# 
+# save_kable(table_2, file = "table_2.html")
+# webshot::webshot("table_2.html", "table_2.pdf")
 
 full_names <- c("Kolmogorov-Smirnov statistic", "Cramer-von Mises statistic",
                   "Anderson-Darling statistic", "Akaike's Information Criterion",
@@ -189,10 +196,10 @@ yield_Weibull <- qweibull(probs, fit_Wei$estimate[1], fit_Wei$estimate[2])
 yield_Beta <- qshift_beta(probs, fit_BetaShift$estimate[1], fit_BetaShift$estimate[2],
                                a = a, b = b)
 
-sim_Norm <- rnorm(10000, mean=fit_norm$estimate[1], sd=fit_norm$estimate[2])
-sim_Gamma <- rgamma(10000, shape=fit_Gam$estimate[1], rate=fit_Gam$estimate[2])
-sim_Weibull <- rweibull(10000, shape=fit_Wei$estimate[1], scale=fit_Wei$estimate[2])
-sim_BetaShift <- rshift_beta(10000, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
+sim_Norm <- rnorm(n, mean=fit_norm$estimate[1], sd=fit_norm$estimate[2])
+sim_Gamma <- rgamma(n, shape=fit_Gam$estimate[1], rate=fit_Gam$estimate[2])
+sim_Weibull <- rweibull(n, shape=fit_Wei$estimate[1], scale=fit_Wei$estimate[2])
+sim_BetaShift <- rshift_beta(n, alpha=fit_BetaShift$estimate[1], beta=fit_BetaShift$estimate[2],
                              a = a, b = b)
 
 fit_df <- data.frame(yield_Norm, yield_Gamma, yield_Weibull, yield_Beta)
@@ -315,12 +322,11 @@ res <- residuals(model_fit)
 
 # Simulation
 days <- 180
-nsim <- 10000
+nsim <- 100000
 set.seed(123)
 model_sim <- ugarchsim(model_fit, n.sim = days,
                        n.start = 1, m.sim = nsim,
                        startMethod = "sample")
-
 #plot(model_sim)
 
 # Simulated log-returns
@@ -474,7 +480,6 @@ ggplot(df_plt, aes(x = Year, y = value,
                                  linetype = c("solid", "dashed")))
 
 
-
 # // OPTION 2 //
 # --- Working with the residuals of the ARMA-GARCH ---
 # 
@@ -594,13 +599,13 @@ library(parallel)
 
 cores <- parallel::detectCores()
 tests <- c("gofCvM", "gofKendallCvM", "gofKendallKS", "gofKS",
-           #"gofRosenblattSnB", "gofRosenblattSnC",
+           "gofRosenblattSnB", "gofRosenblattSnC",
            "gofKernel")
 copulae <- c("normal", "t", "amh", "frank", "plackett")
 
 empcop <- matrix(cbind(yield_dt, price_ts), ncol = 2)
 system.time({
-  test_copulas <- gof(empcop, M = 1000, MJ = 1000,
+  test_copulas <- gof(empcop, M = 1500, MJ = 1000,
                        processes = 6,
                        tests = tests,
                        copula = copulae,)
@@ -609,30 +614,88 @@ system.time({
 unlist(lapply(test_copulas, function(c) c["theta"]))
 
 # Pirate plot
-plot(test_copulas, hybrid = c(1:5))
+plot(test_copulas, hybrid = c(1:4))
 
 empcop <- matrix(cbind(yield_dt*(-1), price_ts), ncol = 2)
 nonneg_copulae <- c("gumbel", "clayton", "joe")
 system.time({
-  test_nonegcopulas <- gof(empcop, M = 1000, MJ = 1000,
+  test_nonegcopulas <- gof(empcop, M = 1500, MJ = 1000,
                            processes = 6,
                            tests = tests,
                            copula = nonneg_copulae)
 })
 
-plot(test_nonegcopulas)
+par(bg = "transparent")
+plot(test_nonegcopulas, hybrid = 1:3)
+
+
 
 all_cops <- c(test_copulas, test_nonegcopulas)
 unlist(lapply(all_cops, function(c) c["theta"]))
 
-all_cops$normal$res.tests[1:(length(tests)),]
-all_cops$t$res.tests[1:(length(tests)),]
-all_cops$frank$res.tests[1:(length(tests)),]
-all_cops$amh$res.tests[1:(length(tests)),]
-all_cops$plackett$res.tests[1:(length(tests)),]
-all_cops$clayton$res.tests[1:(length(tests)),]
-all_cops$gumbel$res.tests[1:(length(tests)),]
-all_cops$joe$res.tests[1:(length(tests)),]
+statistics <- rbind(
+  t(all_cops$normal$res.tests[1:(length(tests)),]),
+  t(all_cops$t$res.tests[1:(length(tests)),]),
+  t(all_cops$amh$res.tests[1:(length(tests)),]),
+  t(all_cops$frank$res.tests[1:(length(tests)),]),
+  t(all_cops$plackett$res.tests[1:(length(tests)),]),
+  t(all_cops$clayton$res.tests[1:(length(tests)),]),
+  t(all_cops$gumbel$res.tests[1:(length(tests)),]),
+  t(all_cops$joe$res.tests[1:(length(tests)),])
+)
+
+theta <- unlist(lapply(all_cops, function(cop) {
+  c(cop["theta"], ifelse(is.null(unlist(cop["df"])[1]), "", unlist(cop["df"])[1]))
+  }))
+
+Parameters <- round(as.numeric(theta), 4)
+tbl_df <- cbind(statistics,Parameters)
+
+
+table_4 <- tbl_df %>%
+  kbl(caption = "<span style='font-size:400%'><center>Table 4:Goodness-of-Fit Tests</center></span>",
+      booktabs = T, linesep = "", align = "c") %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 50) %>%
+  add_header_above(c("Copula", "Test" = 7, "Theta / df" = 1),
+                   color = spec_color(1, option = "A"), bold = T) %>%
+  column_spec(9, width = "6cm")%>%
+  kable_paper(full_width = T) %>%
+  row_spec(0, bold = T, color = spec_color(1)) %>%
+  pack_rows("Normal", start_row=1, end_row=2, 
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("t", start_row=3, end_row=4,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("AMH", start_row=5, end_row=6,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Frank", start_row=7, end_row=8,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Plackett", start_row=9, end_row=10,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Gumbel", start_row=11, end_row=12,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Clayton", start_row=13, end_row=14,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Joe", start_row=15, end_row=16,
+            color=spec_color(1, option = "A")) %>%
+  column_spec(1, bold = T, color = spec_color(1)) %>%
+  column_spec(2, color = "white",
+              background = spec_color(c(unlist(statistics[,1])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(3, color = "white",
+              background = spec_color(c(unlist(statistics[,2])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(4, color = "white",
+              background = spec_color(c(unlist(statistics[,3])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(5, color = "white",
+              background = spec_color(c(unlist(statistics[,4])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(6, color = "white",
+              background = spec_color(c(unlist(statistics[,5])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(7, color = "white",
+              background = spec_color(c(unlist(statistics[,6])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(8, color = "white",
+              background = spec_color(c(unlist(statistics[,7])), option = "D", end = 0.8, direction = -1))
+
+# save_kable(table_4, file = "gofCopulas.html")
+# webshot::webshot("gofCopulas.html", "gofCopulas.pdf")
+# 
 
 # Replacing the thetas for the fitted ones
 
@@ -673,12 +736,14 @@ params <- coef(fit_BetaShift)
 sim_yields <- apply(u_df, 2, function(u) qshift_beta(u, params["alpha"], params["beta"], a, b))
 sim_prices <- apply(v_df, 2, function(v) quantile(emp_cdf_p, v))
 
-# Plots for the presentation
-scatter_hist_2d(u_df[,1], v_df[,1], type = "density")
-#plt + labs(title = class(mycop)[1],
-#           subtitle = paste0("Kendall's Tau = ", round(stat_rho[2],4)))
+# - Plots for the presentation -
+i <- 1
+plt <- scatter_hist_2d(u_df[,i], v_df[,i], type = "density")
+plt + labs(title = cop_names[i],
+           subtitle = paste0("Theta = ", round(as.numeric(theta[2*i-1]),4)))
 
-scatter_hist_2d(sim_yields[,1], sim_prices[,1], type = "hexbin")
+plt <- scatter_hist_2d(sim_yields[,i], sim_prices[,i], type = "hexbin")
+plt
 
 
 # --------------------------- 5. Pricing ---------------------------------------
@@ -709,18 +774,16 @@ risk_prem <- risk_premium(coverage_levels, y_g, x_g, sim_yields, sim_prices)
 # --- Comparision assuming independent yield and price  ---
 sim_rev_indep <- sim_BetaShift * end_avp
 
-risk_premium(coverage_levels, y_g, x_g, data.frame(sim_BetaShift), data.frame(end_avp))
+indep_rp <- risk_premium(coverage_levels, y_g, x_g, data.frame(sim_BetaShift), data.frame(end_avp))
 
 # --- Table with results ---
 
-risk_prem <- round(risk_prem * 100, 3)
+risk_prem <- round(rbind(risk_prem, indep_rp) * 100, 3)
 
 prem_list <- split(risk_prem, 1:nrow(risk_prem))
 
-risk_prem_df <- data.frame(risk_prem,
-                           row.names = c("Normal", "t",
-                                         "AMH", "Frank", "Placket",
-                                         "Gumbel", "Clayton", "Joe"))
+cop_names <- c("Normal", "t", "AMH", "Frank", "Plackett", "Gumbel", "Clayton", "Joe")
+risk_prem_df <- data.frame(risk_prem, row.names = c(cop_names, "Independent"))
 colnames(risk_prem_df) <- paste0(" ", names(coverage_levels), " ")
 
 risk_prem_df %>%
@@ -729,9 +792,13 @@ risk_prem_df %>%
   kable_styling(latex_options = c("striped", "hold_position"), font_size = 55) %>%
   add_header_above(c("", "Premium (%) for Coverage Levels" = 5),
                    color = spec_color(1, option = "A"), bold = T) %>%
-  kable_paper(full_width = F) %>%
+  kable_paper(full_width = T) %>%
   column_spec(1, bold = T, color = spec_color(1)) %>%
   row_spec(0, bold = T, color = spec_color(1)) %>%
+  pack_rows("Copula", start_row=1, end_row=8,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Indep Margins", start_row=9, end_row=9,
+            color=spec_color(1, option = "A")) %>%
   column_spec(2, color = "white",
               background = spec_color(c(unlist(risk_prem[,1])), option = "D", end = 0.8, direction = -1)) %>%
   column_spec(3, color = "white",
@@ -743,9 +810,70 @@ risk_prem_df %>%
   column_spec(6, color = "white",
               background = spec_color(c(unlist(risk_prem[,5])), option = "D", end = 0.8, direction = -1))
 
-# 
-# save_kable(table_5, file = "Guasave_rates_p.html")
-# webshot::webshot("Guasave_rates_p.html", "Guasave_rates_p.pdf")
+# save_kable(table_5, file = "table_5.html")
+# webshot::webshot("table_5.html", "table_5.pdf")
+
+
+# --- Risk Measures ---
+
+risk_levels <- list(0.95, 0.99, 0.995, 0.999, 0.9995)
+qrm <- risk_measures(y_g, x_g, sim_yields, sim_prices, risk_levels)
+
+qrm$VaR
+qrm$ES
+
+# --- Comparison assuming independent yield and price  ---
+# Make sure the number of simulations is the same
+all_sim_y <- cbind(sim_yields, sim_BetaShift)
+all_sim_p <- cbind(sim_prices, end_avp)
+
+qrm <- risk_measures(y_g, x_g, all_sim_y, all_sim_p, risk_levels)
+
+qrm$VaR
+qrm$ES
+
+tbl_6 <- round(cbind(qrm$VaR, qrm$ES) * 100, 2)
+rownames(tbl_6) <- c(cop_names, "Independent")
+
+table_6 <- tbl_6 %>%
+  kbl(caption = "<span style='font-size:400%'><center>Table 6:Risk Measures for fitted Copula Models</center></span>",
+      booktabs = T, linesep = "", align = "c") %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 55) %>%
+  add_header_above(c("", "Value at Risk (%)" = 5, "Expected Shortfall (%)" = 5),
+                   color = spec_color(1, option = "A"), bold = T) %>%
+  kable_paper(full_width = T) %>%
+  column_spec(1, bold = T, color = spec_color(1)) %>%
+  row_spec(0, bold = T, color = spec_color(1)) %>%
+  pack_rows("Copula", start_row=1, end_row=8,
+            color=spec_color(1, option = "A")) %>%
+  pack_rows("Indep Margins", start_row=9, end_row=9,
+            color=spec_color(1, option = "A")) %>%
+  column_spec(2, color = "white",
+              background = spec_color(c(unlist(tbl_6[,1])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(3, color = "white",
+              background = spec_color(c(unlist(tbl_6[,2])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(4, color = "white",
+              background = spec_color(c(unlist(tbl_6[,3])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(5, color = "white",
+              background = spec_color(c(unlist(tbl_6[,4])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(6, color = "white",
+              background = spec_color(c(unlist(tbl_6[,5])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(7, color = "white",
+              background = spec_color(c(unlist(tbl_6[,6])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(8, color = "white",
+              background = spec_color(c(unlist(tbl_6[,7])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(9, color = "white",
+              background = spec_color(c(unlist(tbl_6[,8])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(10, color = "white",
+              background = spec_color(c(unlist(tbl_6[,9])), option = "D", end = 0.8, direction = -1)) %>%
+  column_spec(11, color = "white",
+              background = spec_color(c(unlist(tbl_6[,10])), option = "D", end = 0.8, direction = -1))
+
+
+# save_kable(table_6, file = "table_6.html")
+# webshot::webshot("table_6.html", "table_6.pdf")
+
+
 
 
 # Standard Deviation

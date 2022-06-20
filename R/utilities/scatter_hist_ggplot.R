@@ -60,18 +60,22 @@ scatter_hist_2d <- function(x, y, type = "density",
     my_theme +
     scale_y_continuous(
       name = "Price (USD/bushel)",
-      #limits = c(0, 1800),
-      #labels = as.character(seq(0, 1800, 200)),
-      #breaks = seq(0, 1800, 200)
+      # name = "v",
+      limits = c(0, 2000),
+      labels = as.character(seq(0, 2000, 200)),
+      breaks = seq(0, 2000, 200)
     ) +
     scale_x_continuous(
       name = "Yield (Tonnes/Ha)",
-      #labels = as.character(seq(floor(min(x)), ceiling(max(x)), 2)),
-      #breaks = seq(floor(min(x)), ceiling(max(x)), 2)
+      # name = "u"
+      # labels = as.character(seq(floor(min(x)), ceiling(max(x)), 2)),
+      # breaks = seq(floor(min(x)), ceiling(max(x)), 2)
+      labels = as.character(seq(0, 14, 2)),
+      breaks = seq(0, 14, 2)
     )
   
   # Marginal Histograms
-  ggMarginal(p, 
+  ggMarginal(p,
              type = "histogram",
              size = 3,
              fill = viridis::viridis(1, begin = 0.5, end = 0.5),
