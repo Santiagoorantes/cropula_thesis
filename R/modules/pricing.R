@@ -40,18 +40,17 @@ risk_premium <- function(coverage_levels, y_g, x_g, Y_df, X_df) {
   }
   
   if(m>1){
-    rownames(loss_prob) <- colnames(sim_yields)  
-    rownames(indemnity) <- colnames(sim_yields) 
-    rownames(PR) <- colnames(sim_yields)
+    rownames(loss_prob) <- colnames(Y_df)  
+    rownames(indemnity) <- colnames(Y_df) 
+    rownames(PR) <- colnames(Y_df)
   }
   
   colnames(loss_prob) <- names(coverage_levels)
   colnames(indemnity) <- names(coverage_levels)
   colnames(PR) <- names(coverage_levels)
   
-  
-  print(loss_prob)
-  print(indemnity)
+  # print(loss_prob)
+  # print(indemnity)
   
   return(PR)
   

@@ -1,5 +1,5 @@
 
-# --------------------------- 0. Loading ---------------------------------------
+# --------------------------- 0.0 Loading --------------------------------------
 
 # --- 0.1 Load required packages ---
 source("global.R")
@@ -12,7 +12,7 @@ folders <- c("utilities", "modules")
 file_sources <- list.files(folders, pattern = "\\.R$", full.names = TRUE)
 sapply(file_sources, source, .GlobalEnv)
 
-# ---------------------------- Constants ---------------------------------------
+# -------------------------- 0.1 Constants -------------------------------------
 
 # simulations
 n <- 100000 
@@ -34,7 +34,7 @@ my_filter <-  list(
   type = c("Riego"),
   cycle = c("Otoño-Invierno"),
   state = c("Sinaloa"),
-  municipality = c("Guasave")
+  municipality = c("Ahome")
 )
 
 # Yield per year given filter and group_by
@@ -51,6 +51,10 @@ nrow(trgt_df) == length(unique(trgt_df$year))
 yield <- as.numeric(trgt_df$av_yield)
 l <- length(yield)
 t <- seq(1, l, 1)
+
+# Phillips-Perron Unit Root Test
+PP.test(yield) # H0: has unit root
+# We reject unit root
 
 # The simple linear regression for the yield was sufficient,
 # anything of higher order was not significant.

@@ -8,9 +8,13 @@
 
 light_col <- c("#F76E11", "#A6B1E1", "#D9CE3F", "#219F94")
 dark_col <- c("#00818A", "#610094", "#ED6363")
-letter_size <- 4
-letter_stroke <- 5
-text_size <- 6
+letter_size <- 3
+letter_stroke <- 4
+text_size <- 4
+
+big_size <- 12
+med_size <- 10
+sm_size <- 8
 
 my_theme <- {
   theme_fivethirtyeight() +
@@ -26,20 +30,20 @@ my_theme <- {
 my_theme <- list(theme_fivethirtyeight() +
                    theme(
                      axis.title = element_text(),
-                     plot.title = element_text(size = 30),
-                     plot.subtitle = element_text(size = 25),
-                     axis.title.x = element_text(size = 25),
-                     axis.title.y = element_text(size = 25),
-                     axis.text.x = element_text(size = 20, angle = 90),
-                     axis.text.y = element_text(size = 20),
+                     plot.title = element_text(size = big_size),
+                     plot.subtitle = element_text(size = big_size),
+                     axis.title.x = element_text(size = med_size),
+                     axis.title.y = element_text(size = med_size),
+                     axis.text.x = element_text(size = med_size, angle = 0),
+                     axis.text.y = element_text(size = med_size),
                      panel.grid.minor = element_blank(),
                      legend.background = element_blank(),
                      legend.box.background = element_blank(),
                      panel.background = element_blank(),
                      plot.background = element_blank(),
                      legend.position = "bottom",
-                     legend.title = element_text(size = 25),
-                     legend.text = element_text(size = 25)
+                     legend.title = element_text(size = med_size),
+                     legend.text = element_text(size = med_size)
                    )
 )
 
@@ -67,7 +71,8 @@ my_theme <- list(theme_fivethirtyeight() +
 pearson_plot <- function(data, boot = NULL, method = "unbiased", alpha = 0.8,
                          region_col = light_col, line_col = dark_col,
                          obs.col = "#1E5128", obs_shape = 20, boot.col = "#3E7C17",
-                         annotation_col = "#191A19", theme_options = my_theme) {
+                         annotation_col = "#191A19", theme_options = my_theme,
+                         subtitle = "") {
 
   # if(is.mcnode(data)) data <- as.vector(data)
   if (missing(data) || !is.vector(data, mode = "numeric")) {
@@ -288,7 +293,8 @@ pearson_plot <- function(data, boot = NULL, method = "unbiased", alpha = 0.8,
     )
 
   p <- p + xlab("(Skewness)^2") + ylab("Kurtosis") +
-    labs(title = "Pearson family plot") +
+    labs(title = "Pearson family plot",
+         subtitle = subtitle) +
     theme_options
 
   return(p)

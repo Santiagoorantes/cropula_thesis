@@ -1,6 +1,5 @@
-#-------------------------------------------------------------------------------
-# Import/install all required packages
-#-------------------------------------------------------------------------------
+
+# ----------------- Import/install all required packages -----------------------
 
 packages <- c(
   
@@ -26,6 +25,7 @@ packages <- c(
   # Price series
   "Quandl",
   "rugarch",
+  "lmtest",
   
   # Fitting
   "fitdistrplus",
@@ -49,3 +49,8 @@ rm(new_packs)
 # --- Load packages ---
 suppressPackageStartupMessages(lapply(packages, require, character.only = TRUE))
 
+# --------------------- Load Utilities and Modules -----------------------------
+
+folders <- c("utilities", "modules")
+file_sources <- list.files(folders, pattern = "\\.R$", full.names = TRUE)
+sapply(file_sources, source, .GlobalEnv)
